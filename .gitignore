@@ -1,0 +1,27 @@
+# Secrets
+.env
+
+# Données clients réelles (RGPD) : jamais dans Git
+data/**
+!data/**/
+!data/**/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Modèles ML entraînés
+*.joblib
+*.pkl
+
+# Éditeur / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+
+# Binaires
+*.apk
