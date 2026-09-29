@@ -30,6 +30,15 @@ class Settings(BaseSettings):
     nb_codes_secours: int = 10
     cors_origins: list[str] = []           # l'interface Streamlit appelle l'API côté serveur
 
+    # Optimisation des tournées (OR-Tools)
+    depot_nom: str = "Depot"
+    depot_latitude: float = 45.7578        # à remplacer par l'adresse réelle de l'entrepôt (.env)
+    depot_longitude: float = 4.8320
+    coefficient_routier: float = 1.3       # distance route ≈ vol d'oiseau × 1,3
+    vitesse_moyenne_kmh: float = 30.0      # moyenne urbaine / périurbaine, arrêts compris
+    optim_temps_limite_s: int = 5          # critère du cahier des charges : < 10 s pour 20 clients
+    retour_depot: bool = True
+
     # Géocodage : Nominatim exige un user-agent qui identifie l'application
     nominatim_user_agent: str = "esis-tournees/0.2 (projet etudiant ESIS)"
 

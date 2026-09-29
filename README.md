@@ -19,6 +19,13 @@ docker compose exec api python -m scripts.generer_jeu_simule    # 5000 clients s
 docker compose exec api python -m pytest -q                     # tests unitaires
 ```
 
+### Optimisation
+
+```powershell
+docker compose exec api python -m scripts.tester_optimisation                          # 20 clients réels
+docker compose exec api python -m scripts.tester_optimisation --source simulation --nombre 20
+```
+
 ### Comptes
 
 ```powershell
@@ -36,7 +43,8 @@ docker compose exec api python -m scripts.gerer_utilisateurs lister
 backend/app/core     configuration, chiffrement Fernet
 backend/app/db       connexion, types chiffrés, triggers, création des tables
 backend/app/models   modèles SQLAlchemy
-backend/app/services nettoyage, géocodage, sectorisation, distances
+backend/app/services nettoyage, géocodage, sectorisation, distances, authentification
+backend/app/optim    matrice des trajets et solveur OR-Tools
 backend/scripts      import CSV, géocodage, jeu simulé
 backend/tests        tests unitaires (pytest)
 backend/app/api      routes (authentification, administration)
