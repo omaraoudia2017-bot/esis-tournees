@@ -24,6 +24,8 @@ docker compose exec api python -m pytest -q                     # tests unitaire
 ```powershell
 docker compose exec api python -m scripts.tester_optimisation                          # 20 clients réels
 docker compose exec api python -m scripts.tester_optimisation --source simulation --nombre 20
+docker compose exec api python -m scripts.planifier_tournee                            # CVRPTW : créneaux, service, effectif
+docker compose exec api python -m scripts.planifier_tournee --zone "Première couronne" --nombre 30
 ```
 
 ### Comptes

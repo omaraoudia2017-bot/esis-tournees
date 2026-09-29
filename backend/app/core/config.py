@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     vitesse_moyenne_kmh: float = 30.0      # moyenne urbaine / périurbaine, arrêts compris
     optim_temps_limite_s: int = 5          # critère du cahier des charges : < 10 s pour 20 clients
     retour_depot: bool = True
+    heure_debut_tournee: str = "07:00"     # départ du dépôt
+    heure_fin_tournee: str = "22:00"       # retour au dépôt au plus tard
+    temps_service_normal_min: int = 10     # démarrage à froid (cahier des charges, étape A)
+    temps_service_hayon_min: int = 20
+    penalite_retard_par_seconde: int = 10  # 1 min de retard « coûte » 10 min de trajet
+    penalite_client_non_servi: int = 1_000_000
 
     # Géocodage : Nominatim exige un user-agent qui identifie l'application
     nominatim_user_agent: str = "esis-tournees/0.2 (projet etudiant ESIS)"
