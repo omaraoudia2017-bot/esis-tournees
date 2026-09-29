@@ -28,11 +28,14 @@ services:
       POSTGRES_HOST: db
       TZ: Europe/Paris
       WATCHFILES_FORCE_POLLING: "true"   # rechargement à chaud fiable sous Windows
+      PYTEST_ADDOPTS: "-p no:cacheprovider"   # pas de cache pytest (dossier /app en lecture seule)
     depends_on:
       db:
         condition: service_healthy
     volumes:
       - ./backend/app:/app/app          # code monté : modifications prises en compte sans rebuild
+      - ./backend/scripts:/app/scripts
+      - ./backend/tests:/app/tests
       - ./data:/data:ro                 # échantillons CSV en lecture seule
     ports:
       - "127.0.0.1:8000:8000"

@@ -10,6 +10,7 @@ COPY requirements.txt .
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
 COPY app ./app
+COPY scripts ./scripts
 
 # L'API ne tourne pas en root
 RUN useradd --create-home --uid 1000 appuser

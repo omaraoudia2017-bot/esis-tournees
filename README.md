@@ -10,6 +10,15 @@ docker compose up -d --build
 docker compose exec api python -m app.db.init_db
 ```
 
+### Données
+
+```powershell
+docker compose exec api python -m scripts.importer_csv          # import + nettoyage de data/raw/tournees_esis.csv
+docker compose exec api python -m scripts.geocoder_clients      # géocodage Nominatim (cache) + zones
+docker compose exec api python -m scripts.generer_jeu_simule    # 5000 clients simulés + flotte
+docker compose exec api python -m pytest -q                     # tests unitaires
+```
+
 - API : http://localhost:8000/health
 - Documentation interactive (dev uniquement) : http://localhost:8000/docs
 
@@ -19,6 +28,9 @@ docker compose exec api python -m app.db.init_db
 backend/app/core     configuration, chiffrement Fernet
 backend/app/db       connexion, types chiffrés, triggers, création des tables
 backend/app/models   modèles SQLAlchemy
+backend/app/services nettoyage, géocodage, sectorisation, distances
+backend/scripts      import CSV, géocodage, jeu simulé
+backend/tests        tests unitaires (pytest)
 backend/app/api      routes (à venir)
 frontend/            interface Streamlit (à venir)
 data/                échantillons CSV — non versionné (données personnelles)

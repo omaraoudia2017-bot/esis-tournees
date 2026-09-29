@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     jwt_secret_key: str
     jwt_expire_minutes: int = 30
 
+    # Géocodage : Nominatim exige un user-agent qui identifie l'application
+    nominatim_user_agent: str = "esis-tournees/0.2 (projet etudiant ESIS)"
+
     @property
     def database_url(self) -> URL:
         # URL.create échappe correctement les caractères spéciaux du mot de passe

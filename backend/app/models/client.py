@@ -1,9 +1,10 @@
-"""Fiches clients, construites à partir du format de l'échantillon tournees_isis.csv.
+"""Fiches clients, construites à partir du format de l'échantillon tournees_esis.csv.
 
 Correspondance CSV -> table :
   id_client               -> id_client (10 chiffres, zéros initiaux conservés => texte)
   nom_client              -> nom_client
-  adresse                 -> adresse (brute) + voie / code_postal / ville (découpées)
+  adresse                 -> adresse nettoyée + voie / code_postal / ville (découpées) ;
+                             les compléments (étage, bâtiment, code...) partent dans les notes chiffrées
   telephone               -> telephone        (chiffré)
   digicode                -> digicode         (chiffré, peut contenir plusieurs codes "0629 / 3263")
   creneau_horaire_prefere -> creneau_debut / creneau_fin ("08H00-10H00")
@@ -20,7 +21,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 from app.db.types import EncryptedText
-from app.models.enums import TYPE_CAMION_PG, SourceClient, TypeCamion, TypeClient, pg_enum
+from app.models.enums import (PRECISION_GEOCODAGE_PG, TYPE_CAMION_PG, PrecisionGeocodage,
+                              SourceClient, TypeCamion, TypeClient, pg_enum)
 
 
 class Client(Base):
@@ -50,6 +52,9 @@ class Client(Base):
     ville: Mapped[str] = mapped_column(String(100))
     latitude: Mapped[Decimal | None] = mapped_column(Numeric(9, 6))
     longitude: Mapped[Decimal | None] = mapped_column(Numeric(9, 6))
+    geocode_precision: Mapped[PrecisionGeocodage | None] = mapped_column(
+        PRECISION_GEOCODAGE_PG
+    )
     geocode_le: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Données sensibles (chiffrées Fernet)

@@ -23,6 +23,15 @@ class SourceClient(str, enum.Enum):
     IMPORT_CSV = "import_csv"
     SAISIE_MANUELLE = "saisie_manuelle"   # Module 3 : ajout à la volée
     OCR = "ocr"                           # Module 4 : scan
+    SIMULATION = "simulation"             # jeu de données simulé (tests de charge, ML, démo)
+
+
+class PrecisionGeocodage(str, enum.Enum):
+    ADRESSE = "adresse"     # numéro de rue trouvé
+    RUE = "rue"             # rue trouvée, sans le numéro
+    COMMUNE = "commune"     # centre de la commune (à corriger par l'administrateur)
+    ECHEC = "echec"         # introuvable
+    SIMULEE = "simulee"     # coordonnées générées (jeu simulé)
 
 
 class StatutTournee(str, enum.Enum):
@@ -47,3 +56,4 @@ def pg_enum(enum_cls: type[enum.Enum], nom: str) -> SAEnum:
 
 # Instance partagée : le même type ENUM PostgreSQL sert aux tables clients et vehicules
 TYPE_CAMION_PG = pg_enum(TypeCamion, "type_camion")
+PRECISION_GEOCODAGE_PG = pg_enum(PrecisionGeocodage, "precision_geocodage")  # clients + cache
