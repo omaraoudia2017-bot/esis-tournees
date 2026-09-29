@@ -30,6 +30,16 @@ docker compose exec api python -m scripts.planifier_journee                     
 docker compose exec api python -m scripts.planifier_journee --journee-continue         # comparaison journée continue
 ```
 
+### Tournée du livreur (écran « Ma tournée »)
+
+```powershell
+docker compose exec api python -m scripts.attribuer_tournee --livreur livreur.demo              # 12 clients simulés, matin
+docker compose exec api python -m scripts.attribuer_tournee --livreur livreur.demo --periode apres-midi --remplacer
+```
+
+Puis connexion avec `livreur.demo` sur http://localhost:8501 : liste du jour, bouton « Optimiser »,
+carte, boutons « Démarrer / Terminer la livraison ».
+
 ### Comptes
 
 ```powershell
@@ -47,11 +57,11 @@ docker compose exec api python -m scripts.gerer_utilisateurs lister
 backend/app/core     configuration, chiffrement Fernet
 backend/app/db       connexion, types chiffrés, triggers, création des tables
 backend/app/models   modèles SQLAlchemy
-backend/app/services nettoyage, géocodage, sectorisation, distances, authentification
-backend/app/optim    matrice des trajets et solveur OR-Tools
-backend/scripts      import CSV, géocodage, jeu simulé
+backend/app/services nettoyage, géocodage, sectorisation, authentification, planification, tournée du livreur
+backend/app/optim    matrice des trajets, solveur CVRPTW OR-Tools, segmentation
+backend/scripts      import CSV, géocodage, jeu simulé, comptes, attribution de tournées
 backend/tests        tests unitaires (pytest)
-backend/app/api      routes (authentification, administration)
+backend/app/api      routes (authentification, tournée du livreur, administration)
 backend/app/schemas  schémas Pydantic
 frontend/            interface Streamlit
 data/                échantillons CSV — non versionné (données personnelles)

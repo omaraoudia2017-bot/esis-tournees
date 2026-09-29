@@ -1,9 +1,9 @@
 """Tournées quotidiennes et livraisons (arrêts), avec pointage terrain."""
-from datetime import date, datetime
+from datetime import date, datetime, time
 from decimal import Decimal
 
 from sqlalchemy import (Boolean, CheckConstraint, Computed, Date, DateTime, ForeignKey,
-                        Integer, Numeric, SmallInteger, UniqueConstraint, func)
+                        Integer, Numeric, SmallInteger, Time, UniqueConstraint, func)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -27,6 +27,10 @@ class Tournee(Base):
     )
     # Limite d'effectif figée à la création (copiée depuis la zone). Vérifiée par trigger.
     max_clients: Mapped[int] = mapped_column(SmallInteger, default=15)
+    # Période de la tournée (matin / après-midi / soirée) : départ du dépôt et retour au plus tard.
+    # NULL = journée complète (HEURE_DEBUT_TOURNEE -> HEURE_FIN_TOURNEE du .env)
+    heure_depart: Mapped[time | None] = mapped_column(Time)
+    heure_fin: Mapped[time | None] = mapped_column(Time)
 
     # Résultats de la dernière optimisation OR-Tools
     optimisee_le: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

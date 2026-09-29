@@ -1,64 +1,14 @@
-"""Tests de bout en bout de l'authentification, sur la vraie base PostgreSQL.
-
-Chaque test tourne dans une transaction annulée à la fin : la base n'est jamais modifiée.
+"""Tests de bout en bout de l'authentification, sur la vraie base PostgreSQL
+(fixtures db / client : voir conftest.py).
 """
 from urllib.parse import parse_qs, urlparse
 
 import pyotp
-import pytest
-from fastapi.testclient import TestClient
 from sqlalchemy import select
-from sqlalchemy.orm import Session
 
-from app.api.deps import limiteur_auth, limiteur_ip
-from app.core.security import hacher_mdp
-from app.db.session import engine, get_db
-from app.main import app
-from app.models import JournalSecurite, Utilisateur
+from app.models import JournalSecurite
 from app.models.enums import RoleUtilisateur
-
-MDP = "MotDePasseTest2026"
-
-
-@pytest.fixture
-def db():
-    connexion = engine.connect()
-    transaction = connexion.begin()
-    session = Session(bind=connexion, join_transaction_mode="create_savepoint", expire_on_commit=False)
-    app.dependency_overrides[get_db] = lambda: session
-    limiteur_auth.reinitialiser()
-    limiteur_ip.reinitialiser()
-    yield session
-    app.dependency_overrides.clear()
-    session.close()
-    transaction.rollback()
-    connexion.close()
-
-
-@pytest.fixture
-def client(db):
-    return TestClient(app)
-
-
-def creer_compte(db, identifiant, role=RoleUtilisateur.LIVREUR, secret=None) -> Utilisateur:
-    u = Utilisateur(identifiant=identifiant, nom="TEST", prenom="Test", role=role,
-                    mot_de_passe_hash=hacher_mdp(MDP), totp_secret=secret, totp_active=bool(secret))
-    db.add(u)
-    db.commit()
-    return u
-
-
-def connecter(client, identifiant, secret) -> str:
-    r = client.post("/auth/connexion", json={"identifiant": identifiant, "mot_de_passe": MDP})
-    assert r.status_code == 200 and r.json()["etape"] == "verification"
-    preauth = {"Authorization": f"Bearer {r.json()['jeton_preauth']}"}
-    r = client.post("/auth/2fa/verification", json={"code": pyotp.TOTP(secret).now()}, headers=preauth)
-    assert r.status_code == 200, r.text
-    return r.json()["access_token"]
-
-
-def entete(jeton):
-    return {"Authorization": f"Bearer {jeton}"}
+from tests.outils import MDP, connecter, creer_compte, entete
 
 
 def test_premiere_connexion_enrolement_puis_codes_de_secours(client, db):

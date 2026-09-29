@@ -5,7 +5,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from app.api import routes_admin, routes_auth
+from app.api import routes_admin, routes_auth, routes_tournees
 from app.core.config import get_settings
 from app.db.session import get_db
 
@@ -14,7 +14,7 @@ est_dev = settings.environment == "dev"
 
 app = FastAPI(
     title=settings.app_name,
-    version="0.3.0",
+    version="0.4.0",
     # Documentation Swagger désactivée hors développement (surface d'attaque réduite)
     docs_url="/docs" if est_dev else None,
     redoc_url=None,
@@ -36,13 +36,15 @@ async def entetes_securite(request: Request, call_next):
     reponse.headers["X-Content-Type-Options"] = "nosniff"
     reponse.headers["X-Frame-Options"] = "DENY"
     reponse.headers["Referrer-Policy"] = "no-referrer"
-    if request.url.path.startswith("/auth"):
-        reponse.headers["Cache-Control"] = "no-store"   # jamais de jeton en cache
+    if request.url.path.startswith(("/auth", "/tournees", "/livraisons", "/admin")):
+        # jamais de jeton ni de donnée client (digicode, téléphone) dans un cache
+        reponse.headers["Cache-Control"] = "no-store"
     return reponse
 
 
 app.include_router(routes_auth.router)
 app.include_router(routes_admin.router)
+app.include_router(routes_tournees.router)
 
 
 @app.get("/health", tags=["Supervision"])

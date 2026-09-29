@@ -65,6 +65,8 @@ CREATE TRIGGER trg_journal_ajout_seul
 # Idempotent : IF NOT EXISTS. Permet de faire évoluer le schéma sans vider la base.
 MIGRATIONS = [
     "ALTER TABLE utilisateurs ADD COLUMN IF NOT EXISTS totp_dernier_pas BIGINT",   # Jour 3
+    "ALTER TABLE tournees ADD COLUMN IF NOT EXISTS heure_depart TIME",             # Jour 7
+    "ALTER TABLE tournees ADD COLUMN IF NOT EXISTS heure_fin TIME",                # Jour 7
 ]
 
 # Une instruction SQL par élément (exécutées une à une)

@@ -10,6 +10,7 @@ class Settings(BaseSettings):
 
     app_name: str = "ESIS - Optimisation des tournées"
     environment: str = "dev"
+    fuseau_horaire: str = "Europe/Paris"   # « tournée du jour » et heures de passage prévues
 
     postgres_user: str
     postgres_password: str
