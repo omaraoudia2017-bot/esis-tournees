@@ -32,6 +32,7 @@ class ClientTournee:
     debut_s: int                 # ouverture du créneau
     fin_s: int                   # fermeture du créneau (dépassement = retard pénalisé)
     temps_service_s: int         # temps passé sur place
+    type_requis: str = "normal"  # "normal" ou "hayon" (segmentation de flotte)
 
 
 @dataclass
@@ -44,12 +45,26 @@ class ProblemeTournees:
     heure_fin_s: int = 22 * 3600
     penalite_retard_par_seconde: int = 10
     penalite_client_non_servi: int = 1_000_000
+    cout_fixe_vehicule: int = 0            # coût d'utilisation d'un véhicule (en secondes de trajet)
+    # Type de chaque véhicule ("normal" / "hayon"). None = tous les véhicules acceptent tous les clients.
+    types_vehicules: list[str] | None = None
 
     def __post_init__(self):
         if self.matrice.taille != len(self.clients) + 1:
             raise ValueError("la matrice doit contenir le dépôt + un nœud par client")
         if self.nb_vehicules < 1 or self.max_clients < 1:
             raise ValueError("au moins un véhicule et une capacité positive")
+        if self.types_vehicules is not None and len(self.types_vehicules) != self.nb_vehicules:
+            raise ValueError("un type par véhicule attendu")
+        if self.cout_fixe_vehicule >= self.penalite_client_non_servi:
+            # Sinon le solveur préférerait laisser tous les clients « à reporter »
+            raise ValueError("le coût fixe d'un véhicule doit rester inférieur à la pénalité "
+                             "d'un client non servi")
+
+    def vehicules_compatibles(self, client: ClientTournee) -> list[int]:
+        if self.types_vehicules is None:
+            return list(range(self.nb_vehicules))
+        return [v for v, t in enumerate(self.types_vehicules) if t == client.type_requis]
 
 
 @dataclass
@@ -63,6 +78,7 @@ class Passage:
 @dataclass
 class ParcoursEvalue:
     passages: list[Passage] = field(default_factory=list)
+    depart_s: int = 0
     retour_depot_s: int = 0
     distance_m: int = 0
     duree_trajet_s: int = 0
@@ -75,12 +91,16 @@ class ParcoursEvalue:
     def retard_total_s(self) -> int:
         return sum(p.retard_s for p in self.passages)
 
+    @property
+    def attente_totale_s(self) -> int:
+        return sum(p.attente_s for p in self.passages)
+
 
 def evaluer_parcours(probleme: ProblemeTournees, ordre: list[int]) -> ParcoursEvalue:
     """Heures de passage si le livreur suit `ordre` (nœuds 1..n), en attendant l'ouverture
     du créneau quand il arrive trop tôt."""
     m = probleme.matrice
-    res = ParcoursEvalue()
+    res = ParcoursEvalue(depart_s=probleme.heure_depart_s)
     t, precedent, service_precedent = probleme.heure_depart_s, 0, 0
     for noeud in ordre:
         client = probleme.clients[noeud - 1]

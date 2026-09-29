@@ -26,6 +26,8 @@ docker compose exec api python -m scripts.tester_optimisation                   
 docker compose exec api python -m scripts.tester_optimisation --source simulation --nombre 20
 docker compose exec api python -m scripts.planifier_tournee                            # CVRPTW : créneaux, service, effectif
 docker compose exec api python -m scripts.planifier_tournee --zone "Première couronne" --nombre 30
+docker compose exec api python -m scripts.planifier_journee                            # journée : hayon / normal, matin / après-midi / soirée
+docker compose exec api python -m scripts.planifier_journee --journee-continue         # comparaison journée continue
 ```
 
 ### Comptes

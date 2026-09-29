@@ -106,3 +106,45 @@ def test_20_clients_avec_creneaux_en_moins_de_10_s():
     assert res.non_servis == [] and sorted(res.tournees[0]) == list(range(1, 21))
     # Beaucoup mieux qu'un ordre qui ignore les créneaux
     assert res.retard_total_s <= evaluer_parcours(p, list(range(1, 21))).retard_total_s
+
+
+# --------------------------------------------------------------------------- Jour 6
+def test_client_hayon_jamais_dans_un_camion_normal():
+    points = [a_l_est(2), a_l_est(3), a_l_est(4)]
+    clients = [client("n1"), ClientTournee("h1", 7 * H, 22 * H, 1200, "hayon"), client("n2")]
+    p = probleme(points, clients, nb_vehicules=2, types_vehicules=["normal", "hayon"])
+    res = optimiser_tournees(p, temps_limite_s=1)
+    assert res.non_servis == []
+    assert sorted(res.tournees[0]) == [1, 3] and res.tournees[1] == [2]
+
+
+def test_sans_camion_hayon_le_client_hayon_est_reporte():
+    points = [a_l_est(2), a_l_est(3)]
+    clients = [client("n1"), ClientTournee("h1", 7 * H, 22 * H, 1200, "hayon")]
+    p = probleme(points, clients, nb_vehicules=1, types_vehicules=["normal"])
+    res = optimiser_tournees(p, temps_limite_s=1)
+    assert res.tournees[0] == [1] and res.non_servis == [2]
+
+
+def test_la_penalite_de_retard_arbitre_distance_et_creneaux():
+    # Sans pénalité : le solveur prend le plus court chemin et accumule les retards
+    points = [a_l_est(8), a_l_est(1), a_l_est(4)]
+    clients = [client("loin", "07:00", "07:40"), client("proche", "10:00", "10:30"),
+               client("milieu", "07:00", "08:00")]
+    sans = optimiser_tournees(probleme(points, clients, penalite_retard_par_seconde=0), 1)
+    avec = optimiser_tournees(probleme(points, clients, penalite_retard_par_seconde=10), 1)
+    assert avec.retard_total_s <= sans.retard_total_s
+    assert avec.nb_retards == 0
+
+
+def test_un_camion_de_plus_seulement_s_il_evite_des_retards():
+    # Deux clients opposés, tous deux à livrer avant 07:30 : un seul camion serait en retard
+    points = [a_l_est(10), Point(DEPOT.latitude, DEPOT.longitude - 10 / 77.7)]
+    clients = [client("est", "07:00", "07:30"), client("ouest", "07:00", "07:30")]
+    res = optimiser_tournees(probleme(points, clients, nb_vehicules=2, cout_fixe_vehicule=3600), 1)
+    assert sum(1 for t in res.tournees if t) == 2 and res.nb_retards == 0
+
+    # Si le camion supplémentaire coûte très cher, on accepte le retard avec un seul camion
+    # (coût fixe < pénalité « client non servi », sinon le solveur préférerait ne servir personne)
+    res = optimiser_tournees(probleme(points, clients, nb_vehicules=2, cout_fixe_vehicule=10**5), 1)
+    assert sum(1 for t in res.tournees if t) == 1 and res.nb_retards == 1

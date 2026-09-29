@@ -6,7 +6,9 @@ Modèle (cahier des charges v6, module 2) :
   - chaque véhicule sert au plus `max_clients` clients (10 à 20 selon la zone) : contrainte DURE ;
   - un client qui ne peut pas être servi est laissé « à reporter » plutôt que de rendre
     le problème insoluble (très forte pénalité, donc uniquement en dernier recours) ;
-  - retour au dépôt avant l'heure de fin de journée.
+  - retour au dépôt avant l'heure de fin de journée ;
+  - segmentation de flotte : un client « hayon » ne peut être servi que par un véhicule à hayon,
+    un client « normal » que par un véhicule normal (jamais de véhicule inadapté).
 """
 import time
 from dataclasses import dataclass, field
@@ -40,8 +42,12 @@ class ResultatTournees:
     def retard_total_s(self) -> int:
         return sum(e.retard_total_s for e in self.evaluations)
 
+    @property
+    def attente_totale_s(self) -> int:
+        return sum(e.attente_totale_s for e in self.evaluations)
 
-def optimiser_tournees(p: ProblemeTournees, temps_limite_s: int = 5) -> ResultatTournees:
+
+def optimiser_tournees(p: ProblemeTournees, temps_limite_s: float = 5) -> ResultatTournees:
     debut = time.perf_counter()
     n = len(p.clients)
     if n == 0:
@@ -59,6 +65,8 @@ def optimiser_tournees(p: ProblemeTournees, temps_limite_s: int = 5) -> Resultat
         return durees[noeud(i)][noeud(j)]
 
     routage.SetArcCostEvaluatorOfAllVehicles(routage.RegisterTransitCallback(trajet))
+    # Un véhicule n'est sorti que s'il fait gagner plus que son coût fixe (retards évités, trajet)
+    routage.SetFixedCostOfAllVehicles(p.cout_fixe_vehicule)
 
     # Dimension « Temps » : service chez le client de départ + trajet vers le suivant
     def temps(i: int, j: int) -> int:
@@ -79,6 +87,8 @@ def optimiser_tournees(p: ProblemeTournees, temps_limite_s: int = 5) -> Resultat
         dim_temps.CumulVar(index).SetRange(min(client.debut_s, JOURNEE_S), JOURNEE_S)
         dim_temps.SetCumulVarSoftUpperBound(index, client.fin_s, p.penalite_retard_par_seconde)
         routage.AddDisjunction([index], p.penalite_client_non_servi)
+        # Segmentation de flotte : seuls les véhicules du bon type (-1 = client non servi)
+        routage.VehicleVar(index).SetValues([-1] + p.vehicules_compatibles(client))
 
     for v in range(p.nb_vehicules):
         dim_temps.CumulVar(routage.Start(v)).SetRange(p.heure_depart_s, p.heure_depart_s)
@@ -98,7 +108,7 @@ def optimiser_tournees(p: ProblemeTournees, temps_limite_s: int = 5) -> Resultat
     parametres.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
     parametres.local_search_metaheuristic = (
         routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH)
-    parametres.time_limit.FromSeconds(temps_limite_s)
+    parametres.time_limit.FromMilliseconds(max(100, int(temps_limite_s * 1000)))
 
     solution = routage.SolveWithParameters(parametres)
     if solution is None:

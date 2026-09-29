@@ -42,6 +42,14 @@ class Settings(BaseSettings):
     heure_fin_tournee: str = "22:00"       # retour au dépôt au plus tard
     temps_service_normal_min: int = 10     # démarrage à froid (cahier des charges, étape A)
     temps_service_hayon_min: int = 20
+    # Périodes « départ-retour » ; un client va dans la période qui contient le milieu de son créneau
+    periode_matin: str = "07:00-14:00"
+    periode_apres_midi: str = "13:00-19:00"
+    periode_soiree: str = "17:00-22:00"
+    bascule_apres_midi: str = "13:00"      # milieu de créneau avant 13:00 -> matin
+    bascule_soiree: str = "18:00"          # milieu avant 18:00 -> après-midi, sinon soirée
+    cout_fixe_vehicule_s: int = 3600       # un camion en plus « coûte » 1 h de trajet
+    optim_budget_total_s: float = 9.0      # planification complète < 10 s (marge incluse)
     penalite_retard_par_seconde: int = 10  # 1 min de retard « coûte » 10 min de trajet
     penalite_client_non_servi: int = 1_000_000
 
