@@ -1,4 +1,7 @@
-"""Routes du livreur : tournée du jour, bouton « Optimiser », pointage Démarrer / Terminer."""
+"""Routes du livreur : tournée du jour, bouton « Optimiser », pointage Démarrer / Terminer,
+ajout d'une adresse en cours de tournée."""
+from functools import lru_cache
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
@@ -8,13 +11,21 @@ from app.db.session import get_db
 from app.models import Client, Livraison, Tournee, Utilisateur, Vehicule, Zone
 from app.models.enums import RoleUtilisateur, StatutLivraison
 from app.optim.probleme import en_heure
-from app.schemas.tournee import (ClientVue, DemandeFin, LivraisonVue, Point, ReponseOptimisation,
-                                 TourneeVue)
+from app.schemas.tournee import (ClientVue, DemandeAjoutClient, DemandeFin, LivraisonVue, Point,
+                                 ReponseAjout, ReponseOptimisation, TourneeVue)
 from app.services import tournees as service
+from app.services.geocodage import Geocodeur
 from app.services.journal import contexte_depuis, journaliser
 
 router = APIRouter(tags=["Tournée du livreur"])
 livreur_connecte = exiger_role(RoleUtilisateur.LIVREUR)
+
+
+@lru_cache
+def geocodeur() -> Geocodeur:
+    """Un seul géocodeur pour toute l'API : son limiteur garantit 1 requête/s vers Nominatim.
+    Remplacé par un faux géocodeur dans les tests (aucun appel réseau)."""
+    return Geocodeur(get_settings().nominatim_user_agent)
 
 
 def _http(erreur: service.ErreurTournee) -> HTTPException:
@@ -81,7 +92,8 @@ def tournee_du_jour(u: Utilisateur = Depends(livreur_connecte), db: Session = De
 
 @router.post("/tournees/du-jour/optimiser", response_model=ReponseOptimisation)
 def optimiser(u: Utilisateur = Depends(livreur_connecte), db: Session = Depends(get_db)):
-    """Bouton « Optimiser » : CVRPTW (créneaux, temps de service, véhicule, limite d'effectif)."""
+    """Bouton « Optimiser » : CVRPTW (créneaux, temps de service, véhicule, limite d'effectif).
+    Avant le départ : toute la tournée. En cours de tournée : uniquement l'itinéraire restant."""
     reglages = get_settings()
     try:
         res = service.optimiser_tournee(db, service.tournee_du_jour(db, u, reglages), reglages)
@@ -113,3 +125,20 @@ def terminer(livraison_id: int, request: Request, demande: DemandeFin | None = N
     except service.ErreurTournee as e:
         raise _http(e) from None
     return _vue_livraison(livraison, db.get(Client, livraison.client_id))
+
+
+@router.post("/tournees/du-jour/clients", response_model=ReponseAjout, status_code=201)
+def ajouter_client(demande: DemandeAjoutClient, request: Request,
+                   u: Utilisateur = Depends(livreur_connecte), db: Session = Depends(get_db),
+                   geo: Geocodeur = Depends(geocodeur)):
+    """Ajout d'une adresse à la volée. Refusé si le véhicule est inadapté ou si la limite
+    d'effectif de la zone est atteinte ; appuyer ensuite sur « Optimiser » pour l'intégrer."""
+    reglages = get_settings()
+    try:
+        tournee = service.tournee_du_jour(db, u, reglages)
+        livraison, client, avertissement = service.ajouter_client(
+            db, tournee, service.NouveauClient(**demande.model_dump()), geo, reglages, u,
+            contexte_depuis(request))
+    except service.ErreurTournee as e:
+        raise _http(e) from None
+    return ReponseAjout(livraison=_vue_livraison(livraison, client), avertissement=avertissement)

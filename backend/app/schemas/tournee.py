@@ -2,7 +2,7 @@
 from datetime import date, datetime, time
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class Point(BaseModel):
@@ -61,6 +61,7 @@ class TourneeVue(BaseModel):
 
 
 class ReponseOptimisation(BaseModel):
+    mode: Literal["complet", "restant"]
     nb_clients: int
     nb_optimises: int
     distance_avant_km: float
@@ -73,3 +74,32 @@ class ReponseOptimisation(BaseModel):
 class DemandeFin(BaseModel):
     issue: Literal["livre", "absent", "refuse"] = Field(
         "livre", description="Résultat du passage (alimente l'historique des statuts)")
+
+
+class DemandeAjoutClient(BaseModel):
+    """Nouvelle adresse saisie par le livreur en cours de tournée (module 3).
+    Aucun identifiant de client existant n'est accepté : un livreur ne doit pas pouvoir
+    rattacher n'importe quel client de la base à sa tournée pour en lire le digicode."""
+    nom: str = Field(min_length=2, max_length=100)
+    voie: str = Field(min_length=3, max_length=200, description="numéro et rue")
+    code_postal: str = Field(pattern=r"^[0-9]{5}$")
+    ville: str = Field(min_length=2, max_length=100)
+    type_camion_requis: Literal["normal", "hayon"] = "normal"
+    creneau_debut: time | None = None
+    creneau_fin: time | None = None
+    telephone: str | None = Field(None, max_length=20, pattern=r"^[0-9 +.]{6,20}$")
+    digicode: str | None = Field(None, max_length=50)
+    notes_livraison: str | None = Field(None, max_length=500)
+
+    @model_validator(mode="after")
+    def creneau_coherent(self):
+        if (self.creneau_debut is None) != (self.creneau_fin is None):
+            raise ValueError("indiquez le début ET la fin du créneau, ou aucun des deux")
+        if self.creneau_debut is not None and self.creneau_fin <= self.creneau_debut:
+            raise ValueError("la fin du créneau doit être après le début")
+        return self
+
+
+class ReponseAjout(BaseModel):
+    livraison: LivraisonVue
+    avertissement: str | None = None

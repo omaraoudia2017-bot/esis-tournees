@@ -3,7 +3,7 @@ import random
 
 import pytest
 
-from app.optim.matrice import Point, construire_matrice, longueur_parcours
+from app.optim.matrice import Point, construire_matrice, construire_matrice_depart, longueur_parcours
 from app.optim.solver import optimiser_ordre
 from app.services.distances import haversine_km
 
@@ -68,3 +68,16 @@ def test_cas_limites(nb):
     points = [DEPOT] + [point_a_l_est(1)] * nb
     res = optimiser_ordre(construire_matrice(points, 1.3, 30))
     assert res.ordre == list(range(1, nb + 1))
+
+
+def test_matrice_depart_depuis_la_position_du_livreur():
+    """En cours de tournée : on part de la position actuelle, on revient au dépôt."""
+    position, clients = point_a_l_est(10), [point_a_l_est(12), point_a_l_est(20)]
+    m = construire_matrice_depart(position, DEPOT, clients, 1.0, 30)
+    ref = construire_matrice([DEPOT, *clients], 1.0, 30)
+    km = lambda a, b: round(haversine_km(a.latitude, a.longitude, b.latitude, b.longitude) * 1000)
+    assert m.distances_m[0][1] == km(position, clients[0])  # départ : depuis la position (~2 km)
+    assert m.distances_m[1][0] == ref.distances_m[1][0]     # retour : toujours vers le dépôt
+    assert m.distances_m[0][0] == km(position, DEPOT)       # position -> dépôt sans client
+    assert m.distances_m[1][2] == ref.distances_m[1][2]     # entre clients : inchangé
+    assert construire_matrice_depart(DEPOT, DEPOT, clients, 1.0, 30) == ref

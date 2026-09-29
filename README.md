@@ -38,7 +38,9 @@ docker compose exec api python -m scripts.attribuer_tournee --livreur livreur.de
 ```
 
 Puis connexion avec `livreur.demo` sur http://localhost:8501 : liste du jour, bouton « Optimiser »,
-carte, boutons « Démarrer / Terminer la livraison ».
+carte, boutons « Démarrer / Terminer la livraison », ajout d'une adresse en cours de tournée
+(refusé si le véhicule est inadapté ou si la limite d'effectif de la zone est atteinte) et
+recalcul de l'itinéraire restant depuis la position du livreur.
 
 ### Comptes
 

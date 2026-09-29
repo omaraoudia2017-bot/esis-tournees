@@ -6,7 +6,7 @@ from app.core.config import Settings
 from app.models import Client
 from app.models.enums import TypeCamion
 from app.optim.cvrptw import optimiser_tournees
-from app.optim.matrice import Point, construire_matrice
+from app.optim.matrice import Point, construire_matrice_depart
 from app.optim.probleme import ClientTournee, ParcoursEvalue, ProblemeTournees, en_secondes
 from app.optim.segmentation import Periode, Segment, dimensionner, repartir_budget, segmenter
 
@@ -31,12 +31,17 @@ def vers_client_tournee(c: Client, reglages: Settings) -> ClientTournee:
 
 def construire_probleme(clients: list[Client], reglages: Settings, max_clients: int,
                         nb_vehicules: int = 1, depart_s: int | None = None, fin_s: int | None = None,
-                        types_vehicules: list[str] | None = None) -> ProblemeTournees:
-    points = [Point(reglages.depot_latitude, reglages.depot_longitude)]
-    points += [Point(float(c.latitude), float(c.longitude)) for c in clients]
+                        types_vehicules: list[str] | None = None,
+                        position: Point | None = None) -> ProblemeTournees:
+    """`position` : point de départ du livreur en cours de tournée (sinon le dépôt).
+    Le retour se fait toujours au dépôt."""
+    depot = Point(reglages.depot_latitude, reglages.depot_longitude)
+    points = [Point(float(c.latitude), float(c.longitude)) for c in clients]
+    matrice = construire_matrice_depart(position or depot, depot, points, reglages.coefficient_routier,
+                                        reglages.vitesse_moyenne_kmh)
     return ProblemeTournees(
         clients=[vers_client_tournee(c, reglages) for c in clients],
-        matrice=construire_matrice(points, reglages.coefficient_routier, reglages.vitesse_moyenne_kmh),
+        matrice=matrice,
         nb_vehicules=nb_vehicules,
         max_clients=max_clients,
         heure_depart_s=en_secondes(reglages.heure_debut_tournee) if depart_s is None else depart_s,

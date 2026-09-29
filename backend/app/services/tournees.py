@@ -5,24 +5,37 @@ Règles (cahier des charges v6, module 2) :
   - « Optimiser » réordonne les clients avec le solveur CVRPTW (créneaux, temps de service,
     type de véhicule, limite d'effectif) et enregistre l'ordre et les heures de passage prévues ;
   - « Démarrer » puis « Terminer » horodatent la livraison ; PostgreSQL calcule le temps de
-    service réel (heure_fin - heure_debut), donnée d'entraînement du futur modèle prédictif.
+    service réel (heure_fin - heure_debut), donnée d'entraînement du futur modèle prédictif ;
+  - (module 3) une adresse peut être ajoutée en cours de tournée, sauf si le véhicule est
+    inadapté ou si la limite d'effectif de la zone est atteinte ; « Optimiser » recalcule alors
+    uniquement l'itinéraire restant, depuis la position actuelle du livreur.
 """
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.models import Client, Livraison, Tournee, Utilisateur, Vehicule
-from app.models.enums import StatutLivraison, StatutTournee
+from app.models import Client, Livraison, Tournee, Utilisateur, Vehicule, Zone, ZoneCodePostal
+from app.models.enums import (PrecisionGeocodage, SourceClient, StatutLivraison, StatutTournee,
+                              TypeCamion, TypeClient)
 from app.optim.cvrptw import optimiser_tournees
-from app.optim.probleme import en_secondes, evaluer_parcours
+from app.optim.matrice import Point, construire_matrice, longueur_parcours
+from app.optim.probleme import JOURNEE_S, en_secondes, evaluer_parcours
+from app.services.geocodage import GeocoderServiceError, geocoder_avec_cache
+from app.services.journal import ContexteRequete, journaliser
+from app.services.nettoyage import (est_professionnel, extraire_acces, nettoyer_digicode,
+                                    nettoyer_voie, normaliser_ville)
 from app.services.planification import construire_probleme, temps_service_theorique_s
+from app.services.sectorisation import zone_pour
 
 EN_ATTENTE = (StatutLivraison.A_LIVRER, StatutLivraison.EN_COURS)
 ISSUES_POSSIBLES = (StatutLivraison.LIVRE, StatutLivraison.ABSENT, StatutLivraison.REFUSE)
+PREFIXE_SAISIE = "7"            # identifiants des clients saisis en cours de tournée : 7xxxxxxxxx
 
 
 class ErreurTournee(Exception):
@@ -67,9 +80,10 @@ def livraison_du_livreur(db: Session, livraison_id: int, livreur: Utilisateur) -
 # --------------------------------------------------------------------------- optimisation
 @dataclass
 class ResultatOptimisation:
+    mode: str                          # "complet" (avant départ) ou "restant" (en cours de tournée)
     nb_clients: int
     nb_optimises: int
-    distance_avant_km: float           # mêmes clients, ordre brut (tel qu'attribué)
+    distance_avant_km: float           # mêmes clients, ordre actuel de la liste
     distance_apres_km: float
     nb_retards: int
     duree_calcul_s: float
@@ -87,55 +101,90 @@ def _horodatage(jour: date, secondes: int, reglages: Settings) -> datetime:
     return minuit + timedelta(seconds=int(secondes))
 
 
+def _secondes_locales(instant: datetime, reglages: Settings) -> int:
+    local = instant.astimezone(ZoneInfo(reglages.fuseau_horaire))
+    return local.hour * 3600 + local.minute * 60 + local.second
+
+
+def _point(c: Client) -> Point | None:
+    return None if c.latitude is None or c.longitude is None else Point(float(c.latitude),
+                                                                        float(c.longitude))
+
+
+def _km_parcourus(faites: list[tuple[Livraison, Client]], depot: Point, reglages: Settings) -> float:
+    """Distance estimée déjà parcourue : dépôt -> clients terminés, dans l'ordre réel de passage."""
+    points = [depot] + [p for _, c in faites if (p := _point(c)) is not None]
+    if len(points) < 2:
+        return 0.0
+    m = construire_matrice(points, reglages.coefficient_routier, reglages.vitesse_moyenne_kmh)
+    return longueur_parcours(m.distances_m, list(range(1, len(points))), retour_depot=False) / 1000
+
+
 def optimiser_tournee(db: Session, tournee: Tournee, reglages: Settings) -> ResultatOptimisation:
-    if tournee.statut != StatutTournee.PLANIFIEE:
-        raise ErreurTournee(409, "La tournée a déjà commencé : l'ordre de passage ne peut plus "
-                                 "être recalculé entièrement.")
+    """Avant le départ : optimise toute la tournée depuis le dépôt.
+    En cours de tournée : les livraisons terminées sont figées ; seules les livraisons restantes
+    sont réordonnées, depuis la position du dernier client servi et à partir de l'heure actuelle."""
+    if tournee.statut == StatutTournee.TERMINEE:
+        raise ErreurTournee(409, "La tournée est terminée.")
     lignes = livraisons_de(db, tournee)
-    if not lignes:
-        raise ErreurTournee(409, "La tournée ne contient aucun client.")
+    if any(l.statut == StatutLivraison.EN_COURS for l, _ in lignes):
+        raise ErreurTournee(409, "Terminez la livraison en cours avant de recalculer l'itinéraire.")
 
     # Un client « reporté » lors d'un calcul précédent est remis dans le calcul
     for livraison, _ in lignes:
         if livraison.statut == StatutLivraison.REPORTE:
             livraison.statut = StatutLivraison.A_LIVRER
+    faites = sorted([(l, c) for l, c in lignes if l.statut in ISSUES_POSSIBLES],
+                    key=lambda lc: lc[0].heure_debut_livraison)
+    restantes = [(l, c) for l, c in lignes if l.statut == StatutLivraison.A_LIVRER]
+    if not restantes:
+        raise ErreurTournee(409, "Aucune livraison restante à optimiser.")
 
-    localises = [(l, c) for l, c in lignes if c.latitude is not None and c.longitude is not None]
-    non_localises = [(l, c) for l, c in lignes if c.latitude is None or c.longitude is None]
+    depot = Point(reglages.depot_latitude, reglages.depot_longitude)
+    depart_tournee_s, fin_s = bornes_horaires(tournee, reglages)
+    depart_s, position, mode = depart_tournee_s, None, "complet"
+    if tournee.statut == StatutTournee.EN_COURS:
+        mode = "restant"
+        position = next((p for _, c in reversed(faites) if (p := _point(c)) is not None), depot)
+        depart_s = max(depart_tournee_s, _secondes_locales(maintenant(), reglages))
+        # En cours de journée, le retour peut glisser jusqu'à la fin de journée (retards pénalisés)
+        fin_s = min(max(fin_s, en_secondes(reglages.heure_fin_tournee), depart_s + 3600), JOURNEE_S - 1)
+
+    localises = [(l, c) for l, c in restantes if _point(c) is not None]
+    non_localises = [(l, c) for l, c in restantes if _point(c) is None]
     vehicule = db.get(Vehicule, tournee.vehicule_id) if tournee.vehicule_id else None
-    depart_s, fin_s = bornes_horaires(tournee, reglages)
-
-    clients = [c for _, c in localises]
     probleme = construire_probleme(
-        clients, reglages, tournee.max_clients, nb_vehicules=1, depart_s=depart_s, fin_s=fin_s,
+        [c for _, c in localises], reglages, tournee.max_clients, nb_vehicules=1,
+        depart_s=depart_s, fin_s=fin_s, position=position,
         # Segmentation de flotte : un client hayon ne peut pas être servi par un camion normal
         types_vehicules=[vehicule.type_camion.value] if vehicule else None,
     )
     res = optimiser_tournees(probleme, reglages.optim_temps_limite_s)
     ordre, evaluation = res.tournees[0], res.evaluations[0]
-    # Référence : les mêmes clients, dans l'ordre brut de la liste attribuée
-    avant = evaluer_parcours(probleme, sorted(ordre))
+    avant = evaluer_parcours(probleme, sorted(ordre))     # mêmes clients, ordre actuel de la liste
 
-    # Clients servis : ordre de passage 1..k et heure d'arrivée prévue
-    for rang, (noeud, passage) in enumerate(zip(ordre, evaluation.passages), start=1):
+    # Numérotation : livraisons terminées, puis itinéraire optimisé, puis clients à reporter
+    for rang, (livraison, _) in enumerate(faites, start=1):
+        livraison.ordre_passage = rang
+    for rang, (noeud, passage) in enumerate(zip(ordre, evaluation.passages), start=len(faites) + 1):
         livraison, client = localises[noeud - 1]
         livraison.ordre_passage = rang
         livraison.heure_arrivee_prevue = _horodatage(tournee.date_tournee, passage.arrivee_s, reglages)
         livraison.temps_service_predit_s = temps_service_theorique_s(client, reglages)
-
-    # Clients impossibles à servir (véhicule inadapté, créneau intenable, adresse non géocodée)
     reportes = [localises[k - 1] for k in res.non_servis] + non_localises
-    for rang, (livraison, _) in enumerate(reportes, start=len(ordre) + 1):
+    for rang, (livraison, _) in enumerate(reportes, start=len(faites) + len(ordre) + 1):
         livraison.ordre_passage = rang
         livraison.heure_arrivee_prevue = None
         livraison.statut = StatutLivraison.REPORTE
 
     tournee.optimisee_le = maintenant()
-    tournee.distance_totale_km = round(evaluation.distance_m / 1000, 2)
-    tournee.duree_estimee_min = (evaluation.retour_depot_s - evaluation.depart_s) // 60 if ordre else 0
+    tournee.distance_totale_km = round(_km_parcourus(faites, depot, reglages)
+                                       + evaluation.distance_m / 1000, 2)
+    tournee.duree_estimee_min = max(0, (evaluation.retour_depot_s - depart_tournee_s) // 60)
     db.commit()
 
     return ResultatOptimisation(
+        mode=mode,
         nb_clients=len(lignes),
         nb_optimises=len(ordre),
         distance_avant_km=round(avant.distance_m / 1000, 1),
@@ -144,6 +193,120 @@ def optimiser_tournee(db: Session, tournee: Tournee, reglages: Settings) -> Resu
         duree_calcul_s=res.duree_calcul_s,
         a_reporter=[c.id_client for _, c in reportes],
     )
+
+
+# --------------------------------------------------------------------------- ajout à la volée
+@dataclass
+class NouveauClient:
+    nom: str
+    voie: str
+    code_postal: str
+    ville: str
+    type_camion_requis: str = "normal"
+    creneau_debut: time | None = None
+    creneau_fin: time | None = None
+    telephone: str | None = None
+    digicode: str | None = None
+    notes_livraison: str | None = None
+
+
+def _nouvel_identifiant(db: Session) -> str:
+    dernier = db.scalar(select(func.max(Client.id_client))
+                        .where(Client.id_client.like(f"{PREFIXE_SAISIE}%")))
+    return f"{PREFIXE_SAISIE}{(int(dernier[1:]) if dernier else 0) + 1:09d}"
+
+
+def _zone_id(db: Session, code_postal: str, latitude: float, longitude: float) -> int | None:
+    rattachement = db.get(ZoneCodePostal, code_postal)
+    if rattachement is not None:
+        return rattachement.zone_id
+    return db.scalar(select(Zone.id).where(Zone.nom == zone_pour(code_postal, latitude, longitude).nom))
+
+
+def ajouter_client(db: Session, tournee: Tournee, saisie: NouveauClient, geocodeur,
+                   reglages: Settings, livreur: Utilisateur,
+                   ctx: ContexteRequete | None = None) -> tuple[Livraison, Client, str | None]:
+    """Ajoute une nouvelle adresse à la tournée en cours. Les règles de refus sont vérifiées
+    AVANT le géocodage (aucun appel inutile à Nominatim) ; chaque refus est journalisé."""
+
+    def refuser(motif: str, message: str, statut: int = 409):
+        journaliser(db, "AJOUT_CLIENT_REFUSE", False, ctx, livreur.id, livreur.identifiant,
+                    tournee_id=tournee.id, motif=motif)
+        db.commit()
+        raise ErreurTournee(statut, message)
+
+    if tournee.statut == StatutTournee.TERMINEE:
+        raise ErreurTournee(409, "La tournée est terminée : impossible d'ajouter un client.")
+
+    # Règle 1 : véhicule compatible (segmentation de flotte)
+    type_requis = TypeCamion(saisie.type_camion_requis)
+    vehicule = db.get(Vehicule, tournee.vehicule_id) if tournee.vehicule_id else None
+    if vehicule is not None and vehicule.type_camion != type_requis:
+        refuser("vehicule_incompatible",
+                f"Ajout refusé : ce client nécessite un camion « {type_requis.value} » et votre "
+                f"véhicule {vehicule.immatriculation} est de type « {vehicule.type_camion.value} ». "
+                "Reportez ce client sur une tournée compatible.")
+
+    # Règle 2 : limite d'effectif de la zone (également garantie par un trigger PostgreSQL)
+    nb = db.scalar(select(func.count()).select_from(Livraison).where(Livraison.tournee_id == tournee.id))
+    if nb >= tournee.max_clients:
+        refuser("limite_effectif",
+                f"Ajout refusé : la tournée compte déjà {nb} clients, limite de la zone "
+                f"({tournee.max_clients}) atteinte. Reportez ce client sur une tournée ultérieure.")
+
+    # Nettoyage (mêmes règles que l'import CSV) puis géocodage avec cache
+    code_postal = saisie.code_postal.strip()
+    voie, complement = nettoyer_voie(saisie.voie, code_postal)
+    ville = normaliser_ville(saisie.ville)
+    if not voie or not ville:
+        raise ErreurTournee(422, "Adresse incomplète : indiquez le numéro et la rue, puis la ville.")
+    try:
+        geo = geocoder_avec_cache(db, geocodeur, voie, code_postal, ville)
+    except GeocoderServiceError:
+        raise ErreurTournee(503, "Service de géocodage indisponible : réessayez dans un instant.") from None
+    if geo.latitude is None or geo.precision == PrecisionGeocodage.ECHEC:
+        refuser("adresse_introuvable",
+                "Adresse introuvable : vérifiez le numéro, la rue, le code postal et la ville.", 422)
+
+    nom = " ".join(saisie.nom.upper().split())[:100]
+    notes = " ".join((saisie.notes_livraison or "").split()) or None
+    if complement:
+        notes = f"Complement d adresse : {complement}. {notes or ''}".strip()
+    immeuble, etage, ascenseur = extraire_acces(notes)
+    client = Client(
+        id_client=_nouvel_identifiant(db), nom_client=nom,
+        type_client=TypeClient.PROFESSIONNEL if est_professionnel(nom, notes) else TypeClient.PARTICULIER,
+        adresse=f"{voie}, {code_postal} {ville}", voie=voie, code_postal=code_postal, ville=ville,
+        latitude=Decimal(str(round(geo.latitude, 6))), longitude=Decimal(str(round(geo.longitude, 6))),
+        geocode_precision=geo.precision, geocode_le=maintenant(),
+        telephone=(saisie.telephone or "").strip() or None,
+        digicode=nettoyer_digicode(saisie.digicode), notes_livraison=notes,
+        creneau_debut=saisie.creneau_debut, creneau_fin=saisie.creneau_fin,
+        type_camion_requis=type_requis,
+        est_immeuble=immeuble, etage=etage if etage is None or -5 <= etage <= 60 else None,
+        ascenseur=ascenseur,
+        zone_id=_zone_id(db, code_postal, geo.latitude, geo.longitude),
+        source=SourceClient.SAISIE_MANUELLE,
+    )
+    livraison = Livraison(tournee_id=tournee.id, client_id=client.id_client, ajout_a_la_volee=True,
+                          temps_service_predit_s=temps_service_theorique_s(client, reglages))
+    db.add(client)
+    db.flush()
+    db.add(livraison)
+    try:
+        db.flush()
+    except IntegrityError:          # trigger de limite : deux ajouts simultanés
+        db.rollback()
+        refuser("limite_effectif", f"Ajout refusé : limite de {tournee.max_clients} clients atteinte.")
+
+    journaliser(db, "AJOUT_CLIENT_VOLEE", True, ctx, livreur.id, livreur.identifiant,
+                tournee_id=tournee.id, client_id=client.id_client)
+    db.commit()
+    avertissement = None
+    if geo.precision == PrecisionGeocodage.COMMUNE:
+        avertissement = ("Adresse localisée seulement au centre de la commune : "
+                         "l'heure de passage prévue est approximative.")
+    return livraison, client, avertissement
 
 
 # --------------------------------------------------------------------------- pointage terrain

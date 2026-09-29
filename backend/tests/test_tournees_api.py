@@ -1,61 +1,11 @@
 """Écran « Ma tournée » : liste du jour, bouton « Optimiser », pointage Démarrer / Terminer,
-cloisonnement entre livreurs. Base PostgreSQL réelle, transaction annulée à la fin de chaque test.
+cloisonnement entre livreurs. Base PostgreSQL réelle, transaction annulée à la fin de chaque test
+(fixtures `jeu`, `db`, `client` : voir conftest.py).
 """
-from datetime import time
-from decimal import Decimal
-
-import pyotp
-import pytest
 from sqlalchemy import select
 
-from app.core.config import get_settings
-from app.models import Client, JournalSecurite, Livraison, Tournee, Vehicule, Zone
-from app.models.enums import RoleUtilisateur, SourceClient, TypeCamion
-from app.services.tournees import aujourdhui
-from tests.outils import connecter, creer_compte, entete
-
-# (latitude, longitude, créneau, type de camion) — 4 clients normaux dans Lyon + 1 client hayon
-CLIENTS = [
-    ("45.7640", "4.8357", (8, 10), TypeCamion.NORMAL),
-    ("45.7485", "4.8467", (8, 12), TypeCamion.NORMAL),
-    ("45.7719", "4.8902", (10, 12), TypeCamion.NORMAL),
-    ("45.7578", "4.8320", (9, 11), TypeCamion.NORMAL),
-    ("45.7400", "4.8700", (8, 12), TypeCamion.HAYON),
-]
-
-
-@pytest.fixture(autouse=True)
-def calcul_rapide(monkeypatch):
-    monkeypatch.setattr(get_settings(), "optim_temps_limite_s", 1)
-
-
-@pytest.fixture
-def jeu(db):
-    """Une zone, un camion normal, deux livreurs (A a une tournée, B n'en a pas), un admin."""
-    zone = Zone(nom="Zone de test J7", max_clients=10)
-    vehicule = Vehicule(immatriculation="TEST-J7-N1", type_camion=TypeCamion.NORMAL)
-    db.add_all([zone, vehicule])
-    db.flush()
-    secrets = {nom: pyotp.random_base32() for nom in ("a", "b", "admin")}
-    livreur_a = creer_compte(db, "test.livreur.a", secret=secrets["a"], vehicule_id=vehicule.id)
-    creer_compte(db, "test.livreur.b", secret=secrets["b"], vehicule_id=vehicule.id)
-    creer_compte(db, "test.admin.j7", RoleUtilisateur.ADMIN, secrets["admin"])
-
-    tournee = Tournee(date_tournee=aujourdhui(get_settings()), livreur_id=livreur_a.id,
-                      vehicule_id=vehicule.id, zone_id=zone.id, max_clients=10,
-                      heure_depart=time(7), heure_fin=time(14))
-    db.add(tournee)
-    db.flush()
-    for i, (lat, lon, (h1, h2), type_camion) in enumerate(CLIENTS, start=1):
-        identifiant = f"88990000{i:02d}"
-        db.add(Client(id_client=identifiant, nom_client=f"Client test {i}", adresse=f"{i} rue du Test",
-                      code_postal="69003", ville="LYON", latitude=Decimal(lat), longitude=Decimal(lon),
-                      creneau_debut=time(h1), creneau_fin=time(h2), type_camion_requis=type_camion,
-                      digicode=f"{i}234A", source=SourceClient.SIMULATION))
-        db.flush()
-        db.add(Livraison(tournee_id=tournee.id, client_id=identifiant))
-    db.commit()
-    return {"tournee": tournee, "secrets": secrets}
+from app.models import JournalSecurite, Livraison
+from tests.outils import connecter, entete
 
 
 def test_liste_brute_puis_optimisation(client, db, jeu):

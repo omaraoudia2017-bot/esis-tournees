@@ -12,12 +12,22 @@ from zoneinfo import ZoneInfo
 import folium
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 from streamlit_folium import st_folium
 
 API_URL = os.environ.get("API_URL", "http://api:8000")
 FUSEAU = ZoneInfo(os.environ.get("TZ", "Europe/Paris"))
 
 st.set_page_config(page_title="ESIS Tournées", layout="centered")
+
+# L'interface est déjà en français : on déclare la langue et on interdit la traduction automatique
+# du navigateur. Sinon Chrome réécrit les textes de la page, ce qui casse l'affichage de
+# Streamlit (erreur « NotFoundError: removeChild ») et déforme heures et nombres (09h00, 49,1).
+components.html(
+    "<script>const r = window.parent.document.documentElement;"
+    "r.lang = 'fr'; r.setAttribute('translate', 'no'); r.classList.add('notranslate');</script>",
+    height=0,
+)
 
 ETAT_INITIAL = {"etape": "identifiants", "preauth": None, "jeton": None, "expire_le": None,
                 "role": None, "codes_secours": None, "enrolement": None}
@@ -248,8 +258,12 @@ def optimiser() -> None:
         afficher_erreur(r)
         return
     res = r.json()
-    texte = (f"Itinéraire optimisé en {res['duree_calcul_s']} s : {res['distance_apres_km']} km "
-             f"au lieu de {res['distance_avant_km']} km dans l'ordre initial.")
+    if res["mode"] == "restant":
+        texte = (f"Itinéraire restant recalculé depuis votre position en {res['duree_calcul_s']} s : "
+                 f"{res['distance_apres_km']} km au lieu de {res['distance_avant_km']} km.")
+    else:
+        texte = (f"Itinéraire optimisé en {res['duree_calcul_s']} s : {res['distance_apres_km']} km "
+                 f"au lieu de {res['distance_avant_km']} km dans l'ordre initial.")
     if res["nb_retards"]:
         texte += f" Attention : {res['nb_retards']} créneau(x) risquent d'être dépassés."
     if res["a_reporter"]:
@@ -298,10 +312,12 @@ def carte_livraison(l: dict, rang: int, demarrage_possible: bool, prochaine: boo
     libelle, couleur = STATUTS[l["statut"]]
     with st.container(border=True):
         # Nom échappé : affiché en HTML, il ne doit pas pouvoir injecter de balises (XSS)
+        ajout = " &nbsp; <span style='color:#6b7280'>(ajouté en cours de tournée)</span>" \
+            if l["ajout_a_la_volee"] else ""
         st.markdown(f"**{l['ordre_passage'] or rang}. {html.escape(c['nom'])}** &nbsp; "
-                    f"<span style='color:{couleur};font-weight:600'>● {libelle}</span>",
+                    f"<span style='color:{couleur};font-weight:600'>● {libelle}</span>{ajout}",
                     unsafe_allow_html=True)
-        st.write(f"{c['adresse']}, {c['code_postal']} {c['ville']}")
+        st.write(c["adresse"])           # adresse nettoyée complète (voie, code postal, ville)
         infos = [f"Créneau {(c['creneau_debut'] or '07:00')[:5]}–{(c['creneau_fin'] or '22:00')[:5]}"]
         if l["heure_arrivee_prevue"]:
             infos.append(f"passage prévu {heure_locale(l['heure_arrivee_prevue'])}")
@@ -342,6 +358,65 @@ def carte_livraison(l: dict, rang: int, demarrage_possible: bool, prochaine: boo
                        f"{heure_locale(l['heure_fin_livraison'])} ({duree} min sur place)")
 
 
+def formulaire_ajout(tournee: dict) -> None:
+    """Module 3 : nouvelle adresse en cours de tournée (refusée si véhicule inadapté ou limite atteinte)."""
+    nb = len(tournee["livraisons"])
+    with st.expander(f"Ajouter une adresse ({nb} / {tournee['max_clients']} clients)"):
+        if nb >= tournee["max_clients"]:
+            st.warning("Limite d'effectif de la zone atteinte : un nouveau client doit être reporté "
+                       "sur une tournée ultérieure.")
+            return
+        with st.form("ajout_client"):
+            nom = st.text_input("Nom du client", max_chars=100)
+            voie = st.text_input("Numéro et rue", max_chars=200)
+            col1, col2 = st.columns([1, 2])
+            code_postal = col1.text_input("Code postal", max_chars=5)
+            ville = col2.text_input("Ville", max_chars=100)
+            type_camion = st.radio("Livraison", ["Colis (camion normal)", "Palette (camion hayon)"],
+                                   horizontal=True)
+            avec_creneau = st.checkbox("Créneau horaire imposé")
+            col3, col4 = st.columns(2)
+            debut = col3.time_input("De", value=datetime.strptime("09:00", "%H:%M").time(), step=900)
+            fin = col4.time_input("À", value=datetime.strptime("12:00", "%H:%M").time(), step=900)
+            digicode = st.text_input("Digicode (facultatif)", max_chars=50)
+            telephone = st.text_input("Téléphone (facultatif)", max_chars=20)
+            notes = st.text_area("Notes de livraison (facultatif)", max_chars=500)
+            valider = st.form_submit_button("Ajouter à ma tournée", use_container_width=True)
+        if not valider:
+            return
+        if not (nom.strip() and voie.strip() and code_postal.strip() and ville.strip()):
+            st.error("Nom, rue, code postal et ville sont obligatoires.")
+            return
+        demande = {"nom": nom, "voie": voie, "code_postal": code_postal.strip(), "ville": ville,
+                   "type_camion_requis": "hayon" if type_camion.startswith("Palette") else "normal",
+                   "digicode": digicode or None, "telephone": telephone or None,
+                   "notes_livraison": notes or None}
+        if avec_creneau:
+            demande |= {"creneau_debut": debut.strftime("%H:%M"), "creneau_fin": fin.strftime("%H:%M")}
+        with st.spinner("Vérification de l'adresse..."):
+            r = appel_api("POST", "/tournees/du-jour/clients", st.session_state.jeton, timeout=30,
+                          json=demande)
+        if r is None:
+            return
+        if r.status_code == 401:
+            reinitialiser("Votre session a expiré. Veuillez vous reconnecter.")
+            st.rerun()
+        if r.status_code != 201:
+            try:
+                detail = r.json().get("detail")
+            except ValueError:
+                detail = None
+            st.error(detail if isinstance(detail, str) else "Saisie invalide : vérifiez le code postal, "
+                     "le téléphone et le créneau (la fin doit être après le début).")
+            return
+        texte = (f"{r.json()['livraison']['client']['nom']} ajouté à votre tournée. Appuyez sur le "
+                 "bouton d'optimisation pour l'intégrer au meilleur endroit.")
+        if r.json()["avertissement"]:
+            texte += " " + r.json()["avertissement"]
+        st.session_state.message_tournee = ("warning" if r.json()["avertissement"] else "success", texte)
+        st.rerun()
+
+
 def ecran_tournee(profil: dict) -> None:
     st.title(f"Bonjour {profil['prenom']}")
     r = appel_api("GET", "/tournees/du-jour", st.session_state.jeton)
@@ -373,19 +448,27 @@ def ecran_tournee(profil: dict) -> None:
     else:
         col3.metric("Retour prévu", "—")
 
-    if t["statut"] == "planifiee":
-        if st.button("Optimiser", type="primary", use_container_width=True,
-                     help="Réorganise la tournée : créneaux horaires, temps de service, type de "
-                          "véhicule et limite d'effectif de la zone."):
+    en_cours = any(l["statut"] == "en_cours" for l in livraisons)
+    if t["statut"] == "terminee":
+        st.success("Tournée terminée. Merci !")
+    elif a_faire:
+        demarree = t["statut"] == "en_cours"
+        if st.button("Recalculer l'itinéraire restant" if demarree else "Optimiser", type="primary",
+                     use_container_width=True, disabled=en_cours,
+                     help="Terminez d'abord la livraison en cours." if en_cours else
+                     "Réorganise la tournée : créneaux horaires, temps de service, type de "
+                     "véhicule et limite d'effectif de la zone."):
             optimiser()
         if not t["optimisee_le"]:
             st.caption("Liste dans l'ordre d'attribution, pas encore optimisée.")
-    elif t["statut"] == "terminee":
-        st.success("Tournée terminée. Merci !")
+        elif any(l["ordre_passage"] is None for l in a_faire):
+            st.caption("Nouvelle adresse ajoutée : appuyez sur le bouton ci-dessus pour l'intégrer "
+                       "au meilleur endroit de l'itinéraire.")
+    if t["statut"] != "terminee":
+        formulaire_ajout(t)
 
     carte_tournee(t)
 
-    en_cours = any(l["statut"] == "en_cours" for l in livraisons)
     st.subheader(f"À faire ({len(a_faire)})")
     for rang, l in enumerate(livraisons, start=1):
         if l in a_faire:
