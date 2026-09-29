@@ -1,0 +1,14 @@
+[server]
+headless = true
+enableXsrfProtection = true
+runOnSave = true
+fileWatcherType = "poll"   # rechargement fiable sous Windows (dossier monté)
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"
+
+[theme]
+primaryColor = "#1f6feb"

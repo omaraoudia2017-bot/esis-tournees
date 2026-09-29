@@ -11,7 +11,7 @@ from sqlalchemy import inspect, text
 import app.models  # noqa: F401  (enregistre tous les modèles dans Base.metadata)
 from app.core.config import get_settings
 from app.db.base import Base
-from app.db.ddl import TOUS_LES_TRIGGERS
+from app.db.ddl import MIGRATIONS, TOUS_LES_TRIGGERS
 from app.db.session import engine
 
 
@@ -25,7 +25,7 @@ def init_db(reset: bool = False) -> None:
     Base.metadata.create_all(engine)  # n'écrase jamais une table existante
 
     with engine.begin() as conn:
-        for script in TOUS_LES_TRIGGERS:
+        for script in MIGRATIONS + TOUS_LES_TRIGGERS:
             conn.execute(text(script))
 
     tables = sorted(inspect(engine).get_table_names())

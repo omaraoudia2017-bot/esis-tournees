@@ -4,9 +4,9 @@ from app.models.geocodage import CacheGeocodage
 from app.models.journal import JournalSecurite
 from app.models.referentiel import Vehicule, Zone, ZoneCodePostal
 from app.models.tournee import Livraison, Tournee
-from app.models.utilisateur import Utilisateur
+from app.models.utilisateur import CodeSecours, JetonRevoque, Utilisateur
 
 __all__ = [
-    "CacheGeocodage", "Client", "JournalSecurite", "Livraison", "Tournee",
-    "Utilisateur", "Vehicule", "Zone", "ZoneCodePostal",
+    "CacheGeocodage", "Client", "CodeSecours", "JetonRevoque", "JournalSecurite", "Livraison",
+    "Tournee", "Utilisateur", "Vehicule", "Zone", "ZoneCodePostal",
 ]

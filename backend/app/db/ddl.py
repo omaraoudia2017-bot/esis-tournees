@@ -61,5 +61,11 @@ CREATE TRIGGER trg_journal_ajout_seul
     FOR EACH ROW EXECUTE FUNCTION proteger_journal_securite()
 """]
 
+# Évolutions de tables existantes (create_all ne modifie jamais une table déjà créée).
+# Idempotent : IF NOT EXISTS. Permet de faire évoluer le schéma sans vider la base.
+MIGRATIONS = [
+    "ALTER TABLE utilisateurs ADD COLUMN IF NOT EXISTS totp_dernier_pas BIGINT",   # Jour 3
+]
+
 # Une instruction SQL par élément (exécutées une à une)
 TOUS_LES_TRIGGERS = LIMITE_CLIENTS_TOURNEE + JOURNAL_AJOUT_SEUL

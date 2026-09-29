@@ -41,5 +41,19 @@ services:
       - "127.0.0.1:8000:8000"
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
+  frontend:
+    build: ./frontend
+    container_name: esis_front
+    restart: unless-stopped
+    environment:
+      API_URL: http://api:8000        # appel côté serveur, via le réseau interne Docker
+      TZ: Europe/Paris
+    depends_on:
+      - api
+    volumes:
+      - ./frontend:/app               # modifications prises en compte sans rebuild
+    ports:
+      - "127.0.0.1:8501:8501"
+
 volumes:
   pgdata:

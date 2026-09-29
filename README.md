@@ -19,6 +19,14 @@ docker compose exec api python -m scripts.generer_jeu_simule    # 5000 clients s
 docker compose exec api python -m pytest -q                     # tests unitaires
 ```
 
+### Comptes
+
+```powershell
+docker compose exec api python -m scripts.gerer_utilisateurs creer --identifiant admin.omar --nom AOUDIA --prenom Omar --role admin
+docker compose exec api python -m scripts.gerer_utilisateurs lister
+```
+
+- Interface : http://localhost:8501
 - API : http://localhost:8000/health
 - Documentation interactive (dev uniquement) : http://localhost:8000/docs
 
@@ -31,8 +39,9 @@ backend/app/models   modèles SQLAlchemy
 backend/app/services nettoyage, géocodage, sectorisation, distances
 backend/scripts      import CSV, géocodage, jeu simulé
 backend/tests        tests unitaires (pytest)
-backend/app/api      routes (à venir)
-frontend/            interface Streamlit (à venir)
+backend/app/api      routes (authentification, administration)
+backend/app/schemas  schémas Pydantic
+frontend/            interface Streamlit
 data/                échantillons CSV — non versionné (données personnelles)
 docs/                documentation technique
 ```
