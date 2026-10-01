@@ -205,6 +205,32 @@ Comparaison avec une journée continue :
 docker compose exec api python -m scripts.planifier_journee --journee-continue
 ```
 
+## 7 bis. Modèle prédictif (temps de service)
+
+Comparer les variables des clients réels et simulés :
+
+```powershell
+docker compose exec api python -m scripts.analyser_variables
+```
+
+Entraîner, évaluer (MAE) et enregistrer le modèle Random Forest :
+
+```powershell
+docker compose exec api python -m scripts.entrainer_modele
+```
+
+Évaluer sans enregistrer :
+
+```powershell
+docker compose exec api python -m scripts.entrainer_modele --sans-sauvegarde
+```
+
+Refaire les notes des clients simulés à partir des fréquences réelles :
+
+```powershell
+docker compose exec api python -m scripts.generer_jeu_simule --notes-seulement
+```
+
 ## 8. Base de données
 
 Ouvrir la console PostgreSQL :

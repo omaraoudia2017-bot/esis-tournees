@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     penalite_retard_par_seconde: int = 10  # 1 min de retard « coûte » 10 min de trajet
     penalite_client_non_servi: int = 1_000_000
 
+    # Apprentissage automatique : modèle de temps de service (dossier monté backend/modeles)
+    modele_temps_service: str = "/app/modeles/temps_service.joblib"
+
     # Géocodage : Nominatim exige un user-agent qui identifie l'application
     nominatim_user_agent: str = "esis-tournees/0.2 (projet etudiant ESIS)"
 

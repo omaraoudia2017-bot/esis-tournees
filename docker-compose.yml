@@ -36,6 +36,7 @@ services:
       - ./backend/app:/app/app          # code monté : modifications prises en compte sans rebuild
       - ./backend/scripts:/app/scripts
       - ./backend/tests:/app/tests
+      - ./backend/modeles:/app/modeles  # modèles entraînés (*.joblib, exclus de Git)
       - ./data:/data:ro                 # échantillons CSV en lecture seule
     ports:
       - "127.0.0.1:8000:8000"
