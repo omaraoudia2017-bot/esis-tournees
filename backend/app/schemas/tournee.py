@@ -69,6 +69,7 @@ class ReponseOptimisation(BaseModel):
     nb_retards: int
     duree_calcul_s: float
     a_reporter: list[str]
+    temps_service: Literal["modele", "fixe"] = "fixe"
 
 
 class DemandeFin(BaseModel):

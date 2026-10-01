@@ -83,7 +83,7 @@ docker compose logs --tail 50
 
 ## 4. Tests
 
-Tous les tests (89 attendus) :
+Tous les tests (119 attendus) :
 
 ```powershell
 docker compose exec api python -m pytest -q
@@ -223,6 +223,18 @@ docker compose exec api python -m scripts.entrainer_modele
 
 ```powershell
 docker compose exec api python -m scripts.entrainer_modele --sans-sauvegarde
+```
+
+Mesurer l'apport des temps prédits dans les tournées (heures annoncées / réelles) :
+
+```powershell
+docker compose exec api python -m scripts.evaluer_temps_predits
+```
+
+Entraîner le détecteur de connexions anormales (Isolation Forest) :
+
+```powershell
+docker compose exec api python -m scripts.entrainer_anomalies
 ```
 
 Refaire les notes des clients simulés à partir des fréquences réelles :

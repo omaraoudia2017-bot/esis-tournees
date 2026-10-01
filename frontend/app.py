@@ -202,6 +202,21 @@ def ecran_connecte() -> None:
     if profil["role"] == "admin":
         st.title("Espace administrateur")
         st.caption("Gestion des livreurs, import CSV et tableau de bord : à venir.")
+        r = appel_api("GET", "/admin/journal-securite", st.session_state.jeton,
+                      params={"limite": 20, "evenement": "CONNEXION_ANORMALE"})
+        if r is not None and r.status_code == 200:
+            alertes = r.json()
+            st.subheader("Connexions anormales détectées par l'IA")
+            if alertes:
+                st.warning(f"{len(alertes)} alerte(s) récente(s) : vérifiez qu'il s'agit bien des "
+                           "utilisateurs concernés.")
+                st.dataframe(
+                    [{"Date": a["horodatage"][:19].replace("T", " "), "Compte": a["identifiant_saisi"],
+                      "IP": a["adresse_ip"], "Raisons": ", ".join((a["details"] or {}).get("raisons", [])),
+                      "Score": (a["details"] or {}).get("score")} for a in alertes],
+                    use_container_width=True, hide_index=True)
+            else:
+                st.success("Aucune connexion anormale récente.")
         st.subheader("Journal de sécurité — 20 derniers événements")
         r = appel_api("GET", "/admin/journal-securite", st.session_state.jeton, params={"limite": 20})
         if r is not None and r.status_code == 200:
@@ -264,6 +279,8 @@ def optimiser() -> None:
     else:
         texte = (f"Itinéraire optimisé en {res['duree_calcul_s']} s : {res['distance_apres_km']} km "
                  f"au lieu de {res['distance_avant_km']} km dans l'ordre initial.")
+    if res.get("temps_service") == "modele":
+        texte += " Temps sur place estimés client par client par le modèle d'apprentissage."
     if res["nb_retards"]:
         texte += f" Attention : {res['nb_retards']} créneau(x) risquent d'être dépassés."
     if res["a_reporter"]:
@@ -321,6 +338,8 @@ def carte_livraison(l: dict, rang: int, demarrage_possible: bool, prochaine: boo
         infos = [f"Créneau {(c['creneau_debut'] or '07:00')[:5]}–{(c['creneau_fin'] or '22:00')[:5]}"]
         if l["heure_arrivee_prevue"]:
             infos.append(f"passage prévu {heure_locale(l['heure_arrivee_prevue'])}")
+        if l["temps_service_predit_s"] and l["statut"] in ("a_livrer", "en_cours"):
+            infos.append(f"≈ {round(l['temps_service_predit_s'] / 60)} min sur place")
         infos.append("camion hayon (palette)" if c["type_camion_requis"] == "hayon" else "colis")
         st.caption(" · ".join(infos))
 

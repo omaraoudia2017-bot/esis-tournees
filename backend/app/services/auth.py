@@ -15,6 +15,7 @@ from app.core.security import (HACHAGE_FACTICE, TYPE_ACCES, TYPE_PREAUTH, creer_
                                generer_codes_secours, hacher_code_secours, nouveau_secret_totp,
                                uri_totp, verifier_mdp, verifier_totp)
 from app.models import CodeSecours, JetonRevoque, Utilisateur
+from app.services.anomalies import analyser_connexion
 from app.services.journal import ContexteRequete, journaliser
 
 MESSAGE_IDENTIFIANTS = "Identifiant ou mot de passe incorrect."
@@ -159,6 +160,8 @@ def _finaliser_connexion(db: Session, u: Utilisateur, charge_preauth: dict,
                         expire_le=datetime.fromtimestamp(charge_preauth["exp"], tz=timezone.utc)))
     jeton, _, expiration = creer_jeton(u.id, u.role.value, TYPE_ACCES,
                                        timedelta(minutes=get_settings().jwt_expire_minutes))
+    # IA de sécurité : connexion comparée aux habitudes du compte (alerte, jamais blocage)
+    analyser_connexion(db, u, ctx, methode, u.derniere_connexion, get_settings())
     journaliser(db, "CONNEXION_REUSSIE", True, ctx, u.id, u.identifiant, methode=methode)
     db.commit()
     return {"access_token": jeton, "token_type": "bearer", "expire_le": expiration,

@@ -1,8 +1,11 @@
 """Passage des données de la base (clients, zone, flotte) aux problèmes d'optimisation."""
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from app.core.config import Settings
+from app.ml.temps_service import PredicteurTempsService
+from app.ml.variables import variables_client
 from app.models import Client
 from app.models.enums import TypeCamion
 from app.optim.cvrptw import optimiser_tournees
@@ -12,19 +15,54 @@ from app.optim.segmentation import Periode, Segment, dimensionner, repartir_budg
 
 
 def temps_service_theorique_s(client: Client, reglages: Settings) -> int:
-    """Démarrage à froid : valeurs fixes (10 min colis, 20 min palette/hayon).
-    Elles seront remplacées par les prédictions du modèle de Machine Learning."""
+    """Démarrage à froid : valeurs fixes (10 min colis, 20 min palette/hayon)."""
     minutes = (reglages.temps_service_hayon_min if client.type_camion_requis == TypeCamion.HAYON
                else reglages.temps_service_normal_min)
     return minutes * 60
 
 
-def vers_client_tournee(c: Client, reglages: Settings) -> ClientTournee:
+_predicteurs: dict[tuple[str, float], PredicteurTempsService] = {}
+
+
+def predicteur(reglages: Settings) -> PredicteurTempsService | None:
+    """Modèle de temps de service s'il est activé et entraîné. Rechargé automatiquement
+    quand le fichier change (nouvel entraînement), sans redémarrer l'API."""
+    if not reglages.utiliser_modele_temps_service:
+        return None
+    chemin = Path(reglages.modele_temps_service)
+    try:
+        cle = (str(chemin), chemin.stat().st_mtime)
+    except OSError:
+        return None
+    if cle not in _predicteurs:
+        _predicteurs.clear()
+        try:
+            _predicteurs[cle] = PredicteurTempsService(chemin)
+        except Exception:      # fichier corrompu : valeurs fixes plutôt qu'une panne
+            _predicteurs[cle] = PredicteurTempsService(None)
+    p = _predicteurs[cle]
+    return p if p.actif else None
+
+
+def estimer_temps_service_s(clients: list[Client], reglages: Settings) -> tuple[list[int], str]:
+    """Temps de service de chaque client, en secondes, et leur origine : "modele" (Random Forest)
+    ou "fixe" (démarrage à froid, ou modèle absent / illisible)."""
+    p = predicteur(reglages)
+    if p is not None and clients:
+        depot = (reglages.depot_latitude, reglages.depot_longitude)
+        try:
+            return p.predire_s([variables_client(c, depot) for c in clients]), "modele"
+        except Exception:      # modèle incompatible : l'optimisation doit toujours fonctionner
+            pass
+    return [temps_service_theorique_s(c, reglages) for c in clients], "fixe"
+
+
+def vers_client_tournee(c: Client, reglages: Settings, temps_service_s: int | None = None) -> ClientTournee:
     return ClientTournee(
         identifiant=c.id_client,
         debut_s=en_secondes(c.creneau_debut) if c.creneau_debut else en_secondes(reglages.heure_debut_tournee),
         fin_s=en_secondes(c.creneau_fin) if c.creneau_fin else en_secondes(reglages.heure_fin_tournee),
-        temps_service_s=temps_service_theorique_s(c, reglages),
+        temps_service_s=temps_service_theorique_s(c, reglages) if temps_service_s is None else temps_service_s,
         type_requis=c.type_camion_requis.value,
     )
 
@@ -32,15 +70,18 @@ def vers_client_tournee(c: Client, reglages: Settings) -> ClientTournee:
 def construire_probleme(clients: list[Client], reglages: Settings, max_clients: int,
                         nb_vehicules: int = 1, depart_s: int | None = None, fin_s: int | None = None,
                         types_vehicules: list[str] | None = None,
-                        position: Point | None = None) -> ProblemeTournees:
+                        position: Point | None = None,
+                        temps_service_s: list[int] | None = None) -> ProblemeTournees:
     """`position` : point de départ du livreur en cours de tournée (sinon le dépôt).
-    Le retour se fait toujours au dépôt."""
+    Le retour se fait toujours au dépôt. `temps_service_s` : par défaut, estimé par le modèle."""
     depot = Point(reglages.depot_latitude, reglages.depot_longitude)
     points = [Point(float(c.latitude), float(c.longitude)) for c in clients]
     matrice = construire_matrice_depart(position or depot, depot, points, reglages.coefficient_routier,
                                         reglages.vitesse_moyenne_kmh)
+    if temps_service_s is None:
+        temps_service_s, _ = estimer_temps_service_s(clients, reglages)
     return ProblemeTournees(
-        clients=[vers_client_tournee(c, reglages) for c in clients],
+        clients=[vers_client_tournee(c, reglages, t) for c, t in zip(clients, temps_service_s)],
         matrice=matrice,
         nb_vehicules=nb_vehicules,
         max_clients=max_clients,

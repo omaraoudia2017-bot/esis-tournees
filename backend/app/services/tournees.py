@@ -30,7 +30,7 @@ from app.services.geocodage import GeocoderServiceError, geocoder_avec_cache
 from app.services.journal import ContexteRequete, journaliser
 from app.services.nettoyage import (est_professionnel, extraire_acces, nettoyer_digicode,
                                     nettoyer_voie, normaliser_ville)
-from app.services.planification import construire_probleme, temps_service_theorique_s
+from app.services.planification import construire_probleme, estimer_temps_service_s
 from app.services.sectorisation import zone_pour
 
 EN_ATTENTE = (StatutLivraison.A_LIVRER, StatutLivraison.EN_COURS)
@@ -88,6 +88,7 @@ class ResultatOptimisation:
     nb_retards: int
     duree_calcul_s: float
     a_reporter: list[str] = field(default_factory=list)
+    temps_service: str = "fixe"        # "modele" : temps sur place prédits par le Random Forest
 
 
 def bornes_horaires(tournee: Tournee, reglages: Settings) -> tuple[int, int]:
@@ -153,9 +154,11 @@ def optimiser_tournee(db: Session, tournee: Tournee, reglages: Settings) -> Resu
     localises = [(l, c) for l, c in restantes if _point(c) is not None]
     non_localises = [(l, c) for l, c in restantes if _point(c) is None]
     vehicule = db.get(Vehicule, tournee.vehicule_id) if tournee.vehicule_id else None
+    clients = [c for _, c in localises]
+    temps_s, source_temps = estimer_temps_service_s(clients, reglages)
     probleme = construire_probleme(
-        [c for _, c in localises], reglages, tournee.max_clients, nb_vehicules=1,
-        depart_s=depart_s, fin_s=fin_s, position=position,
+        clients, reglages, tournee.max_clients, nb_vehicules=1,
+        depart_s=depart_s, fin_s=fin_s, position=position, temps_service_s=temps_s,
         # Segmentation de flotte : un client hayon ne peut pas être servi par un camion normal
         types_vehicules=[vehicule.type_camion.value] if vehicule else None,
     )
@@ -170,7 +173,7 @@ def optimiser_tournee(db: Session, tournee: Tournee, reglages: Settings) -> Resu
         livraison, client = localises[noeud - 1]
         livraison.ordre_passage = rang
         livraison.heure_arrivee_prevue = _horodatage(tournee.date_tournee, passage.arrivee_s, reglages)
-        livraison.temps_service_predit_s = temps_service_theorique_s(client, reglages)
+        livraison.temps_service_predit_s = probleme.clients[noeud - 1].temps_service_s
     reportes = [localises[k - 1] for k in res.non_servis] + non_localises
     for rang, (livraison, _) in enumerate(reportes, start=len(faites) + len(ordre) + 1):
         livraison.ordre_passage = rang
@@ -192,6 +195,7 @@ def optimiser_tournee(db: Session, tournee: Tournee, reglages: Settings) -> Resu
         nb_retards=evaluation.nb_retards,
         duree_calcul_s=res.duree_calcul_s,
         a_reporter=[c.id_client for _, c in reportes],
+        temps_service=source_temps,
     )
 
 
@@ -289,7 +293,7 @@ def ajouter_client(db: Session, tournee: Tournee, saisie: NouveauClient, geocode
         source=SourceClient.SAISIE_MANUELLE,
     )
     livraison = Livraison(tournee_id=tournee.id, client_id=client.id_client, ajout_a_la_volee=True,
-                          temps_service_predit_s=temps_service_theorique_s(client, reglages))
+                          temps_service_predit_s=estimer_temps_service_s([client], reglages)[0][0])
     db.add(client)
     db.flush()
     db.add(livraison)

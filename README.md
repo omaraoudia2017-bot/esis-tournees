@@ -48,6 +48,8 @@ recalcul de l'itinéraire restant depuis la position du livreur.
 docker compose exec api python -m scripts.analyser_variables              # réels vs simulés
 docker compose exec api python -m scripts.analyser_variables --csv /tmp/variables.csv
 docker compose exec api python -m scripts.entrainer_modele                # Random Forest + MAE
+docker compose exec api python -m scripts.evaluer_temps_predits           # apport dans les tournées
+docker compose exec api python -m scripts.entrainer_anomalies             # Isolation Forest (connexions)
 ```
 
 ### Comptes

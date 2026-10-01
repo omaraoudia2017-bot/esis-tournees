@@ -52,7 +52,12 @@ CLIENTS = [
 
 @pytest.fixture(autouse=True)
 def calcul_rapide(monkeypatch):
-    monkeypatch.setattr(get_settings(), "optim_temps_limite_s", 1)
+    """Tests rapides et déterministes : solveur limité à 1 s, modèles d'IA désactivés
+    (ils sont testés à part, avec des modèles entraînés dans un dossier temporaire)."""
+    reglages = get_settings()
+    monkeypatch.setattr(reglages, "optim_temps_limite_s", 1)
+    monkeypatch.setattr(reglages, "utiliser_modele_temps_service", False)
+    monkeypatch.setattr(reglages, "utiliser_detection_anomalies", False)
 
 
 @pytest.fixture

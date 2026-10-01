@@ -25,7 +25,7 @@ from app.models import Client, Livraison, Tournee, Utilisateur, Vehicule, Zone
 from app.models.enums import RoleUtilisateur, SourceClient
 from app.optim.segmentation import periode_de
 from app.services.journal import journaliser
-from app.services.planification import periodes, temps_service_theorique_s, vers_client_tournee
+from app.services.planification import estimer_temps_service_s, periodes, vers_client_tournee
 from app.services.tournees import aujourdhui
 
 
@@ -78,9 +78,9 @@ def main(args) -> None:
                           heure_depart=_heure(periode.depart_s), heure_fin=_heure(periode.fin_s))
         db.add(tournee)
         db.flush()
-        for c in choisis:
-            db.add(Livraison(tournee_id=tournee.id, client_id=c.id_client,
-                             temps_service_predit_s=temps_service_theorique_s(c, reglages)))
+        temps_s, _ = estimer_temps_service_s(choisis, reglages)
+        for c, t in zip(choisis, temps_s):
+            db.add(Livraison(tournee_id=tournee.id, client_id=c.id_client, temps_service_predit_s=t))
         journaliser(db, "ADMIN_ATTRIBUTION_TOURNEE", True, None, livreur.id, livreur.identifiant,
                     tournee_id=tournee.id, nb_clients=nombre, source="cli")
         db.commit()

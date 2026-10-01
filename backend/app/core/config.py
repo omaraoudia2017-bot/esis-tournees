@@ -56,6 +56,10 @@ class Settings(BaseSettings):
 
     # Apprentissage automatique : modèle de temps de service (dossier monté backend/modeles)
     modele_temps_service: str = "/app/modeles/temps_service.joblib"
+    utiliser_modele_temps_service: bool = True   # False = valeurs fixes (comparaison, repli)
+    # Détection des connexions anormales (Isolation Forest sur le journal de sécurité)
+    modele_anomalies: str = "/app/modeles/anomalies.joblib"
+    utiliser_detection_anomalies: bool = True
 
     # Géocodage : Nominatim exige un user-agent qui identifie l'application
     nominatim_user_agent: str = "esis-tournees/0.2 (projet etudiant ESIS)"
