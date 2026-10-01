@@ -1,4 +1,5 @@
-"""Interface ESIS (Streamlit) — connexion sécurisée (module 1) et tournée du livreur (module 2).
+"""Interface ESIS (Streamlit) — connexion sécurisée (module 1), tournée du livreur (modules 2 et 3),
+espace administrateur (module 4, dans espace_admin.py).
 
 Le jeton de session reste côté serveur Streamlit (st.session_state) : il n'est jamais
 stocké dans le navigateur (ni cookie, ni localStorage).
@@ -7,6 +8,7 @@ import base64
 import html
 import os
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import folium
@@ -15,10 +17,14 @@ import streamlit as st
 import streamlit.components.v1 as components
 from streamlit_folium import st_folium
 
+import espace_admin
+
 API_URL = os.environ.get("API_URL", "http://api:8000")
 FUSEAU = ZoneInfo(os.environ.get("TZ", "Europe/Paris"))
 
-st.set_page_config(page_title="ESIS Tournées", layout="centered")
+# Écran large pour l'administrateur (tableaux, carte), étroit pour le livreur (smartphone)
+st.set_page_config(page_title="ESIS Tournées",
+                   layout="wide" if st.session_state.get("role") == "admin" else "centered")
 
 # L'interface est déjà en français : on déclare la langue et on interdit la traduction automatique
 # du navigateur. Sinon Chrome réécrit les textes de la page, ce qui casse l'affichage de
@@ -200,32 +206,9 @@ def ecran_connecte() -> None:
             st.rerun()
 
     if profil["role"] == "admin":
-        st.title("Espace administrateur")
-        st.caption("Gestion des livreurs, import CSV et tableau de bord : à venir.")
-        r = appel_api("GET", "/admin/journal-securite", st.session_state.jeton,
-                      params={"limite": 20, "evenement": "CONNEXION_ANORMALE"})
-        if r is not None and r.status_code == 200:
-            alertes = r.json()
-            st.subheader("Connexions anormales détectées par l'IA")
-            if alertes:
-                st.warning(f"{len(alertes)} alerte(s) récente(s) : vérifiez qu'il s'agit bien des "
-                           "utilisateurs concernés.")
-                st.dataframe(
-                    [{"Date": a["horodatage"][:19].replace("T", " "), "Compte": a["identifiant_saisi"],
-                      "IP": a["adresse_ip"], "Raisons": ", ".join((a["details"] or {}).get("raisons", [])),
-                      "Score": (a["details"] or {}).get("score")} for a in alertes],
-                    use_container_width=True, hide_index=True)
-            else:
-                st.success("Aucune connexion anormale récente.")
-        st.subheader("Journal de sécurité — 20 derniers événements")
-        r = appel_api("GET", "/admin/journal-securite", st.session_state.jeton, params={"limite": 20})
-        if r is not None and r.status_code == 200:
-            st.dataframe(
-                [{"Date": e["horodatage"][:19].replace("T", " "), "Événement": e["evenement"],
-                  "Succès": e["succes"], "Compte": e["identifiant_saisi"], "IP": e["adresse_ip"]}
-                 for e in r.json()],
-                use_container_width=True, hide_index=True,
-            )
+        espace_admin.ecran_admin(profil, SimpleNamespace(
+            appel_api=appel_api, reinitialiser=reinitialiser, carte_tournee=carte_tournee,
+            heure_locale=heure_locale, fuseau=FUSEAU))
     else:
         ecran_tournee(profil)
 

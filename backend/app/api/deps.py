@@ -74,6 +74,10 @@ def utilisateur_courant(charge: dict = Depends(charge_acces),
     u = db.get(Utilisateur, int(charge["sub"]))
     if u is None or not u.actif:
         raise NON_AUTHENTIFIE
+    # Mot de passe ou 2FA réinitialisé par l'administrateur : les sessions ouvertes avant tombent
+    emis = charge.get("emis", charge["iat"])
+    if u.sessions_invalidees_le and emis < u.sessions_invalidees_le.timestamp():
+        raise NON_AUTHENTIFIE
     return u
 
 

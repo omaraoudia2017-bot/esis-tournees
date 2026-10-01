@@ -5,6 +5,7 @@ Fonctions pures, sans accès à la base : testées dans tests/test_securite.py.
 import hashlib
 import hmac
 import secrets
+import string
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -59,8 +60,10 @@ def creer_jeton(sujet: int, role: str, type_jeton: str, duree: timedelta) -> tup
     maintenant = datetime.now(timezone.utc)
     expiration = maintenant + duree
     jti = str(uuid.uuid4())
+    # « emis » : instant d'émission à la milliseconde (iat est arrondi à la seconde), comparé à
+    # la date d'invalidation des sessions d'un compte (désactivation, réinitialisation)
     charge = {"sub": str(sujet), "role": role, "typ": type_jeton, "jti": jti,
-              "iat": maintenant, "exp": expiration}
+              "iat": maintenant, "emis": round(maintenant.timestamp(), 3), "exp": expiration}
     jeton = jwt.encode(charge, get_settings().jwt_secret_key, algorithm=ALGORITHME_JWT)
     return jeton, jti, expiration
 
@@ -128,3 +131,12 @@ def hacher_code_secours(code: str) -> str:
     """HMAC-SHA256 avec la clé serveur : suffisant pour des codes aléatoires à forte entropie."""
     cle = get_settings().jwt_secret_key.encode("utf-8")
     return hmac.new(cle, normaliser_code_secours(code).encode("ascii"), hashlib.sha256).hexdigest()
+
+
+def generer_mdp(longueur: int = 16) -> str:
+    """Mot de passe aléatoire conforme à la politique (création de compte, réinitialisation)."""
+    alphabet = string.ascii_letters + string.digits + "-_!?*"
+    while True:
+        mdp = "".join(secrets.choice(alphabet) for _ in range(longueur))
+        if not valider_politique_mdp(mdp):
+            return mdp

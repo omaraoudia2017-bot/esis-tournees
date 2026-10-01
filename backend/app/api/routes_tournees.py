@@ -32,7 +32,7 @@ def _http(erreur: service.ErreurTournee) -> HTTPException:
     return HTTPException(erreur.statut, erreur.message)
 
 
-def _vue_livraison(l: Livraison, c: Client) -> LivraisonVue:
+def vue_livraison(l: Livraison, c: Client) -> LivraisonVue:
     return LivraisonVue(
         id=l.id, ordre_passage=l.ordre_passage, statut=l.statut.value,
         ajout_a_la_volee=l.ajout_a_la_volee, heure_arrivee_prevue=l.heure_arrivee_prevue,
@@ -50,7 +50,7 @@ def _vue_livraison(l: Livraison, c: Client) -> LivraisonVue:
     )
 
 
-def _vue_tournee(db: Session, t: Tournee) -> TourneeVue:
+def vue_tournee(db: Session, t: Tournee) -> TourneeVue:
     reglages = get_settings()
     zone = db.get(Zone, t.zone_id) if t.zone_id else None
     vehicule = db.get(Vehicule, t.vehicule_id) if t.vehicule_id else None
@@ -66,7 +66,7 @@ def _vue_tournee(db: Session, t: Tournee) -> TourneeVue:
         duree_estimee_min=t.duree_estimee_min,
         depot=Point(nom=reglages.depot_nom, latitude=reglages.depot_latitude,
                     longitude=reglages.depot_longitude),
-        livraisons=[_vue_livraison(l, c) for l, c in service.livraisons_de(db, t)],
+        livraisons=[vue_livraison(l, c) for l, c in service.livraisons_de(db, t)],
     )
 
 
@@ -85,7 +85,7 @@ def _livraison_autorisee(request: Request, db: Session, livraison_id: int, u: Ut
 def tournee_du_jour(u: Utilisateur = Depends(livreur_connecte), db: Session = Depends(get_db)):
     """Liste des clients de la tournée du jour du livreur connecté (et de lui seul)."""
     try:
-        return _vue_tournee(db, service.tournee_du_jour(db, u, get_settings()))
+        return vue_tournee(db, service.tournee_du_jour(db, u, get_settings()))
     except service.ErreurTournee as e:
         raise _http(e) from None
 
@@ -111,7 +111,7 @@ def demarrer(livraison_id: int, request: Request, u: Utilisateur = Depends(livre
         livraison = service.demarrer_livraison(db, livraison, get_settings())
     except service.ErreurTournee as e:
         raise _http(e) from None
-    return _vue_livraison(livraison, db.get(Client, livraison.client_id))
+    return vue_livraison(livraison, db.get(Client, livraison.client_id))
 
 
 @router.post("/livraisons/{livraison_id}/terminer", response_model=LivraisonVue)
@@ -124,7 +124,7 @@ def terminer(livraison_id: int, request: Request, demande: DemandeFin | None = N
         livraison = service.terminer_livraison(db, livraison, issue, get_settings())
     except service.ErreurTournee as e:
         raise _http(e) from None
-    return _vue_livraison(livraison, db.get(Client, livraison.client_id))
+    return vue_livraison(livraison, db.get(Client, livraison.client_id))
 
 
 @router.post("/tournees/du-jour/clients", response_model=ReponseAjout, status_code=201)
@@ -141,4 +141,4 @@ def ajouter_client(demande: DemandeAjoutClient, request: Request,
             contexte_depuis(request))
     except service.ErreurTournee as e:
         raise _http(e) from None
-    return ReponseAjout(livraison=_vue_livraison(livraison, client), avertissement=avertissement)
+    return ReponseAjout(livraison=vue_livraison(livraison, client), avertissement=avertissement)

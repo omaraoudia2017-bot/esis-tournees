@@ -47,3 +47,11 @@ def appliquer_sectorisation(db: Session) -> Counter:
         ).execution_options(synchronize_session=False)
     )
     return bilan
+
+
+def zone_id_pour(db: Session, code_postal: str, latitude: float, longitude: float) -> int | None:
+    """Zone d'un client : rattachement connu du code postal, sinon règle de distance."""
+    rattachement = db.get(ZoneCodePostal, code_postal)
+    if rattachement is not None:
+        return rattachement.zone_id
+    return db.scalar(select(Zone.id).where(Zone.nom == zone_pour(code_postal, latitude, longitude).nom))

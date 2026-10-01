@@ -32,6 +32,9 @@ class Utilisateur(Base):
     tentatives_echec: Mapped[int] = mapped_column(SmallInteger, default=0, server_default="0")
     verrouille_jusqua: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Jetons émis avant cette date refusés (désactivation, réinitialisation du mot de passe ou 2FA)
+    sessions_invalidees_le: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     vehicule_id: Mapped[int | None] = mapped_column(ForeignKey("vehicules.id", ondelete="SET NULL"))
     actif: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     derniere_connexion: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

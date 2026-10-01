@@ -83,7 +83,7 @@ docker compose logs --tail 50
 
 ## 4. Tests
 
-Tous les tests (119 attendus) :
+Tous les tests (135 attendus) :
 
 ```powershell
 docker compose exec api python -m pytest -q
@@ -134,6 +134,31 @@ docker compose exec api python -m scripts.attribuer_tournee --livreur livreur.de
 ```
 
 Adresse à saisir pour tester l'ajout en cours de tournée : `10 rue de la République`, `69002`, `Lyon`.
+
+## 5 bis. Espace administrateur
+
+Se connecter avec `admin.omar` sur http://localhost:8501 : rubriques Tableau de bord, Tournées du jour,
+Import CSV, Livreurs, Clients, Sécurité.
+
+Remplir le tableau de bord pour une démo (10 jours ouvrés passés, 4 livreurs fictifs désactivés,
+clients simulés uniquement — jamais utilisés pour entraîner le modèle) :
+
+```powershell
+docker compose exec api python -m scripts.generer_historique_demo
+```
+
+Plus d'historique, ou tout retirer :
+
+```powershell
+docker compose exec api python -m scripts.generer_historique_demo --jours 20 --livreurs 5
+docker compose exec api python -m scripts.generer_historique_demo --purger
+```
+
+Tests de l'espace administrateur :
+
+```powershell
+docker compose exec api python -m pytest tests/test_admin_comptes.py tests/test_admin_tournees.py -v
+```
 
 ## 6. Comptes utilisateurs
 

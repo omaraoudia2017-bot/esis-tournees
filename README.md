@@ -52,6 +52,19 @@ docker compose exec api python -m scripts.evaluer_temps_predits           # appo
 docker compose exec api python -m scripts.entrainer_anomalies             # Isolation Forest (connexions)
 ```
 
+### Espace administrateur
+
+Connexion avec un compte administrateur sur http://localhost:8501 : tableau de bord (respect des
+créneaux, remplissage, écart des temps de service, alertes), tournées du jour (attribution, suivi sur
+carte, ajout d'un client existant), import CSV avec géocodage, gestion des comptes livreurs
+(création, désactivation, réinitialisation du mot de passe et de la 2FA, camion), clients
+(repositionnement manuel, type de camion, export et anonymisation RGPD), journal de sécurité.
+
+```powershell
+docker compose exec api python -m scripts.generer_historique_demo           # historique simulé (démo)
+docker compose exec api python -m scripts.generer_historique_demo --purger  # le retirer
+```
+
 ### Comptes
 
 ```powershell
@@ -69,14 +82,15 @@ docker compose exec api python -m scripts.gerer_utilisateurs lister
 backend/app/core     configuration, chiffrement Fernet
 backend/app/db       connexion, types chiffrés, triggers, création des tables
 backend/app/models   modèles SQLAlchemy
-backend/app/services nettoyage, géocodage, sectorisation, authentification, planification, tournée du livreur
+backend/app/services nettoyage, import CSV, géocodage, sectorisation, authentification, planification,
+                     tournée du livreur, administration, détection d'anomalies
 backend/app/optim    matrice des trajets, solveur CVRPTW OR-Tools, segmentation
 backend/app/ml       variables du modèle prédictif (Regex sur les notes), modèles
 backend/scripts      import CSV, géocodage, jeu simulé, comptes, attribution de tournées
 backend/tests        tests unitaires (pytest)
 backend/app/api      routes (authentification, tournée du livreur, administration)
 backend/app/schemas  schémas Pydantic
-frontend/            interface Streamlit
+frontend/            interface Streamlit (app.py ; espace_admin.py pour le module 4)
 data/                échantillons CSV — non versionné (données personnelles)
 docs/                documentation technique
 ```

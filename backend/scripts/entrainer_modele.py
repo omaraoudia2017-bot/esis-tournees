@@ -8,8 +8,8 @@ Usage :
 Jeu d'entraînement :
   - historique simulé : livraisons tirées parmi les clients simulés, temps calculé selon les
     hypothèses de app/ml/temps_service.py (HYPOTHESES) avec un aléa ;
-  - pointages réels : livraisons terminées « livré » dont la durée est plausible (1 à 90 min).
-    Les pointages de démonstration (quelques secondes) sont écartés.
+  - pointages réels : livraisons terminées « livré » chez de vrais clients (pas de clients simulés,
+    donc pas l'historique de démonstration), de durée plausible (1 à 90 min).
 Aucun identifiant ni texte n'entre dans le jeu : uniquement les variables (anonymisation).
 Critère du cahier des charges : erreur moyenne (MAE) du modèle < MAE des valeurs fixes 10 / 20 min.
 """
@@ -36,7 +36,9 @@ def charger(depot):
             select(Client, Livraison.temps_service_reel_s)
             .join(Livraison, Livraison.client_id == Client.id_client)
             .where(Livraison.statut == StatutLivraison.LIVRE,
-                   Livraison.temps_service_reel_s.is_not(None))).all()
+                   Livraison.temps_service_reel_s.is_not(None),
+                   # pointages terrain sur de vrais clients uniquement (pas l'historique de démo)
+                   Client.source != SourceClient.SIMULATION)).all()
     retenus = [(variables_client(c, depot), s / 60) for c, s in pointages
                if DUREE_PLAUSIBLE_S[0] <= s <= DUREE_PLAUSIBLE_S[1]]
     return simules, retenus, len(pointages) - len(retenus)

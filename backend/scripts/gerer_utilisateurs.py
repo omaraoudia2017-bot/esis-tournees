@@ -1,4 +1,4 @@
-"""Gestion des comptes en ligne de commande (en attendant l'espace administrateur du Jour 12).
+"""Gestion des comptes en ligne de commande (les mêmes actions existent dans l'espace administrateur).
 
 Usage :
     docker compose exec api python -m scripts.gerer_utilisateurs creer --identifiant admin.omar \
@@ -14,25 +14,15 @@ Chaque action est tracée dans le journal de sécurité.
 """
 import argparse
 import getpass
-import secrets
-import string
 import sys
 
 from sqlalchemy import delete, func, select
 
-from app.core.security import hacher_mdp, valider_politique_mdp
+from app.core.security import generer_mdp, hacher_mdp, valider_politique_mdp
 from app.db.session import SessionLocal
 from app.models import CodeSecours, Utilisateur, Vehicule
 from app.models.enums import RoleUtilisateur
 from app.services.journal import journaliser
-
-
-def generer_mdp(longueur: int = 16) -> str:
-    alphabet = string.ascii_letters + string.digits + "-_!?*"
-    while True:
-        mdp = "".join(secrets.choice(alphabet) for _ in range(longueur))
-        if not valider_politique_mdp(mdp):
-            return mdp
 
 
 def demander_mdp() -> str:

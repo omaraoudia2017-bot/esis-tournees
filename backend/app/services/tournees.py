@@ -20,7 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.models import Client, Livraison, Tournee, Utilisateur, Vehicule, Zone, ZoneCodePostal
+from app.models import Client, Livraison, Tournee, Utilisateur, Vehicule
 from app.models.enums import (PrecisionGeocodage, SourceClient, StatutLivraison, StatutTournee,
                               TypeCamion, TypeClient)
 from app.optim.cvrptw import optimiser_tournees
@@ -31,7 +31,7 @@ from app.services.journal import ContexteRequete, journaliser
 from app.services.nettoyage import (est_professionnel, extraire_acces, nettoyer_digicode,
                                     nettoyer_voie, normaliser_ville)
 from app.services.planification import construire_probleme, estimer_temps_service_s
-from app.services.sectorisation import zone_pour
+from app.services.referentiel import zone_id_pour
 
 EN_ATTENTE = (StatutLivraison.A_LIVRER, StatutLivraison.EN_COURS)
 ISSUES_POSSIBLES = (StatutLivraison.LIVRE, StatutLivraison.ABSENT, StatutLivraison.REFUSE)
@@ -220,13 +220,6 @@ def _nouvel_identifiant(db: Session) -> str:
     return f"{PREFIXE_SAISIE}{(int(dernier[1:]) if dernier else 0) + 1:09d}"
 
 
-def _zone_id(db: Session, code_postal: str, latitude: float, longitude: float) -> int | None:
-    rattachement = db.get(ZoneCodePostal, code_postal)
-    if rattachement is not None:
-        return rattachement.zone_id
-    return db.scalar(select(Zone.id).where(Zone.nom == zone_pour(code_postal, latitude, longitude).nom))
-
-
 def ajouter_client(db: Session, tournee: Tournee, saisie: NouveauClient, geocodeur,
                    reglages: Settings, livreur: Utilisateur,
                    ctx: ContexteRequete | None = None) -> tuple[Livraison, Client, str | None]:
@@ -289,7 +282,7 @@ def ajouter_client(db: Session, tournee: Tournee, saisie: NouveauClient, geocode
         type_camion_requis=type_requis,
         est_immeuble=immeuble, etage=etage if etage is None or -5 <= etage <= 60 else None,
         ascenseur=ascenseur,
-        zone_id=_zone_id(db, code_postal, geo.latitude, geo.longitude),
+        zone_id=zone_id_pour(db, code_postal, geo.latitude, geo.longitude),
         source=SourceClient.SAISIE_MANUELLE,
     )
     livraison = Livraison(tournee_id=tournee.id, client_id=client.id_client, ajout_a_la_volee=True,

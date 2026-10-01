@@ -32,6 +32,7 @@ class PrecisionGeocodage(str, enum.Enum):
     COMMUNE = "commune"     # centre de la commune (à corriger par l'administrateur)
     ECHEC = "echec"         # introuvable
     SIMULEE = "simulee"     # coordonnées générées (jeu simulé)
+    MANUELLE = "manuelle"   # position corrigée à la main par l'administrateur
 
 
 class StatutTournee(str, enum.Enum):
