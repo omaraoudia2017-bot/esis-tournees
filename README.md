@@ -42,6 +42,13 @@ carte, boutons « Démarrer / Terminer la livraison », ajout d'une adresse en c
 (refusé si le véhicule est inadapté ou si la limite d'effectif de la zone est atteinte) et
 recalcul de l'itinéraire restant depuis la position du livreur.
 
+### Variables du modèle prédictif
+
+```powershell
+docker compose exec api python -m scripts.analyser_variables              # réels vs simulés
+docker compose exec api python -m scripts.analyser_variables --csv /tmp/variables.csv
+```
+
 ### Comptes
 
 ```powershell
@@ -61,6 +68,7 @@ backend/app/db       connexion, types chiffrés, triggers, création des tables
 backend/app/models   modèles SQLAlchemy
 backend/app/services nettoyage, géocodage, sectorisation, authentification, planification, tournée du livreur
 backend/app/optim    matrice des trajets, solveur CVRPTW OR-Tools, segmentation
+backend/app/ml       variables du modèle prédictif (Regex sur les notes), modèles
 backend/scripts      import CSV, géocodage, jeu simulé, comptes, attribution de tournées
 backend/tests        tests unitaires (pytest)
 backend/app/api      routes (authentification, tournée du livreur, administration)
