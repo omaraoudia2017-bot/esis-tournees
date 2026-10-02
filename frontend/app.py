@@ -89,7 +89,7 @@ def ecran_identifiants() -> None:
     with st.form("connexion"):
         identifiant = st.text_input("Identifiant", autocomplete="username")
         mdp = st.text_input("Mot de passe", type="password", autocomplete="current-password")
-        valider = st.form_submit_button("Se connecter", use_container_width=True)
+        valider = st.form_submit_button("Se connecter", width="stretch")
     if valider:
         if not identifiant.strip() or not mdp:
             st.error("Veuillez renseigner l'identifiant et le mot de passe.")
@@ -133,7 +133,7 @@ def ecran_enrolement() -> None:
 
     with st.form("activation"):
         code = st.text_input("Code à 6 chiffres", max_chars=6)
-        valider = st.form_submit_button("Activer", use_container_width=True)
+        valider = st.form_submit_button("Activer", width="stretch")
     if valider:
         r = appel_api("POST", "/auth/2fa/activation", st.session_state.preauth, json={"code": code.strip()})
         if r is not None and r.status_code == 200:
@@ -153,7 +153,7 @@ def ecran_codes_secours() -> None:
                "de l'application si vous perdez votre téléphone.")
     st.code("\n".join(st.session_state.codes_secours), language=None)
     confirme = st.checkbox("J'ai conservé mes codes de secours")
-    if st.button("Continuer", disabled=not confirme, use_container_width=True):
+    if st.button("Continuer", disabled=not confirme, width="stretch"):
         st.session_state.codes_secours = None
         st.session_state.etape = "connecte"
         st.rerun()
@@ -164,7 +164,7 @@ def ecran_verification() -> None:
     with st.form("verification"):
         code = st.text_input("Code à 6 chiffres de votre application d'authentification",
                              help="Téléphone perdu ? Saisissez un de vos codes de secours (XXXXX-XXXXX).")
-        valider = st.form_submit_button("Valider", use_container_width=True)
+        valider = st.form_submit_button("Valider", width="stretch")
     if valider:
         if not code.strip():
             st.error("Veuillez saisir le code.")
@@ -200,7 +200,7 @@ def ecran_connecte() -> None:
         st.caption(f"Rôle : {profil['role']}")
         restant = int((st.session_state.expire_le - datetime.now(timezone.utc)).total_seconds() // 60)
         st.caption(f"Session valable encore {restant} min")
-        if st.button("Se déconnecter", use_container_width=True):
+        if st.button("Se déconnecter", width="stretch"):
             appel_api("POST", "/auth/deconnexion", st.session_state.jeton)
             reinitialiser("Vous êtes déconnecté.")
             st.rerun()
@@ -223,6 +223,11 @@ STATUTS = {  # libellé, couleur (carte et pastilles)
     "reporte": ("À reporter", "#7c3aed"),
 }
 ISSUES = {"Livré": "livre", "Absent": "absent", "Refusé": "refuse"}
+
+
+def nombre_fr(valeur: float, decimales: int = 1) -> str:
+    """57.0 -> « 57,0 » (affichage à la française)."""
+    return f"{valeur:.{decimales}f}".replace(".", ",")
 
 
 def heure_locale(iso: str | None) -> str:
@@ -256,12 +261,13 @@ def optimiser() -> None:
         afficher_erreur(r)
         return
     res = r.json()
+    duree, apres, avant = (nombre_fr(res[k]) for k in ("duree_calcul_s", "distance_apres_km",
+                                                         "distance_avant_km"))
     if res["mode"] == "restant":
-        texte = (f"Itinéraire restant recalculé depuis votre position en {res['duree_calcul_s']} s : "
-                 f"{res['distance_apres_km']} km au lieu de {res['distance_avant_km']} km.")
+        texte = (f"Itinéraire restant recalculé depuis votre position en {duree} s : "
+                 f"{apres} km au lieu de {avant} km.")
     else:
-        texte = (f"Itinéraire optimisé en {res['duree_calcul_s']} s : {res['distance_apres_km']} km "
-                 f"au lieu de {res['distance_avant_km']} km dans l'ordre initial.")
+        texte = f"Itinéraire optimisé en {duree} s : {apres} km au lieu de {avant} km dans l'ordre initial."
     if res.get("temps_service") == "modele":
         texte += " Temps sur place estimés client par client par le modèle d'apprentissage."
     if res["nb_retards"]:
@@ -344,14 +350,14 @@ def carte_livraison(l: dict, rang: int, demarrage_possible: bool, prochaine: boo
                         st.write(f"Téléphone : {c['telephone']}")
 
         if l["statut"] == "a_livrer" and demarrage_possible:
-            if st.button("Démarrer la livraison", key=f"demarrer_{l['id']}", use_container_width=True,
+            if st.button("Démarrer la livraison", key=f"demarrer_{l['id']}", width="stretch",
                          type="primary" if prochaine else "secondary"):
                 action_tournee(f"/livraisons/{l['id']}/demarrer")
         elif l["statut"] == "en_cours":
             st.caption(f"Démarrée à {heure_locale(l['heure_debut_livraison'])}")
             issue = st.radio("Résultat du passage", list(ISSUES), horizontal=True, key=f"issue_{l['id']}")
             if st.button("Terminer la livraison", key=f"terminer_{l['id']}", type="primary",
-                         use_container_width=True):
+                         width="stretch"):
                 action_tournee(f"/livraisons/{l['id']}/terminer", f"{c['nom']} : {issue.lower()}.",
                                json={"issue": ISSUES[issue]})
         elif l["heure_fin_livraison"]:
@@ -383,7 +389,7 @@ def formulaire_ajout(tournee: dict) -> None:
             digicode = st.text_input("Digicode (facultatif)", max_chars=50)
             telephone = st.text_input("Téléphone (facultatif)", max_chars=20)
             notes = st.text_area("Notes de livraison (facultatif)", max_chars=500)
-            valider = st.form_submit_button("Ajouter à ma tournée", use_container_width=True)
+            valider = st.form_submit_button("Ajouter à ma tournée", width="stretch")
         if not valider:
             return
         if not (nom.strip() and voie.strip() and code_postal.strip() and ville.strip()):
@@ -443,7 +449,7 @@ def ecran_tournee(profil: dict) -> None:
     a_faire = [l for l in livraisons if l["statut"] in ("a_livrer", "en_cours")]
     col1, col2, col3 = st.columns(3)
     col1.metric("Livraisons", f"{faites} / {len(livraisons) - sum(l['statut'] == 'reporte' for l in livraisons)}")
-    col2.metric("Distance", f"{t['distance_totale_km']:.1f} km" if t["distance_totale_km"] else "—")
+    col2.metric("Distance", f"{nombre_fr(t['distance_totale_km'])} km" if t["distance_totale_km"] else "—")
     if t["duree_estimee_min"]:
         depart = datetime.strptime(t["heure_depart"][:5], "%H:%M")
         col3.metric("Retour prévu", f"{depart + timedelta(minutes=t['duree_estimee_min']):%H:%M}")
@@ -456,7 +462,7 @@ def ecran_tournee(profil: dict) -> None:
     elif a_faire:
         demarree = t["statut"] == "en_cours"
         if st.button("Recalculer l'itinéraire restant" if demarree else "Optimiser", type="primary",
-                     use_container_width=True, disabled=en_cours,
+                     width="stretch", disabled=en_cours,
                      help="Terminez d'abord la livraison en cours." if en_cours else
                      "Réorganise la tournée : créneaux horaires, temps de service, type de "
                      "véhicule et limite d'effectif de la zone."):

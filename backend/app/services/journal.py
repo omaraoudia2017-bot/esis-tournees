@@ -1,8 +1,10 @@
 """Écriture dans le journal de sécurité (source du futur modèle de détection d'anomalies)."""
 import ipaddress
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 from fastapi import Request
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import JournalSecurite
@@ -46,3 +48,21 @@ def journaliser(db: Session, evenement: str, succes: bool, ctx: ContexteRequete 
         user_agent=ctx.user_agent,
         details=details or None,
     ))
+
+
+DELAI_CONSULTATION = timedelta(hours=1)
+
+
+def tracer_consultation(db: Session, utilisateur, ctx: ContexteRequete | None, tournee_id: int) -> None:
+    """Accès aux données sensibles d'une tournée (digicodes, téléphones, notes) : tracé au plus une
+    fois par heure, par compte et par tournée (l'interface relit la tournée à chaque clic)."""
+    depuis = datetime.now(timezone.utc) - DELAI_CONSULTATION
+    deja = db.scalar(select(JournalSecurite.id).where(
+        JournalSecurite.utilisateur_id == utilisateur.id,
+        JournalSecurite.evenement == "CONSULTATION_TOURNEE",
+        JournalSecurite.horodatage >= depuis,
+        JournalSecurite.details["tournee_id"].as_integer() == tournee_id).limit(1))
+    if deja is None:
+        journaliser(db, "CONSULTATION_TOURNEE", True, ctx, utilisateur.id, utilisateur.identifiant,
+                    tournee_id=tournee_id)
+        db.commit()

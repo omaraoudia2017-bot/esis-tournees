@@ -109,7 +109,7 @@ def executer(tournee: Tournee, clients: list[Client], reglages, rng: random.Rand
 
 def main(args) -> None:
     reglages = get_settings()
-    rng = random.Random(args.graine)
+    rng = random.Random(args.graine)  # tirage de simulation reproductible (graine), sans usage de sécurité  # nosec B311
     depot = (reglages.depot_latitude, reglages.depot_longitude)
     toutes_periodes = periodes(reglages)
     with SessionLocal() as db:

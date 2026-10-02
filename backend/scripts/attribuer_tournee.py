@@ -71,7 +71,7 @@ def main(args) -> None:
                 vers_client_tournee(c, reglages), periodes(reglages)).nom == periode.nom]
         if len(dans_periode) < nombre:
             sys.exit(f"Seulement {len(dans_periode)} clients disponibles pour ce tirage.")
-        choisis = random.Random(args.graine).sample(dans_periode, nombre)   # ordre quelconque
+        choisis = random.Random(args.graine).sample(dans_periode, nombre)  # tirage de simulation reproductible (graine), sans usage de sécurité  # nosec B311
 
         tournee = Tournee(date_tournee=jour, livreur_id=livreur.id, vehicule_id=vehicule.id,
                           zone_id=zone.id, max_clients=zone.max_clients,

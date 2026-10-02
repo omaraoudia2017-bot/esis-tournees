@@ -26,7 +26,7 @@ from app.schemas.tournee import TourneeVue
 from app.services import admin as service
 from app.services import import_csv
 from app.services.geocodage import Geocodeur
-from app.services.journal import contexte_depuis
+from app.services.journal import contexte_depuis, tracer_consultation
 
 admin_connecte = exiger_role(RoleUtilisateur.ADMIN)
 router = APIRouter(prefix="/admin", tags=["Administration"], dependencies=[Depends(admin_connecte)])
@@ -181,11 +181,13 @@ def creer_tournee(demande: DemandeTournee, a: service.Acteur = Depends(acteur),
 
 
 @router.get("/tournees/{tournee_id}", response_model=TourneeVue)
-def detail_tournee(tournee_id: int, db: Session = Depends(get_db)):
-    """Même vue que l'écran du livreur (carte, ordre, pointages), pour le suivi en direct."""
+def detail_tournee(tournee_id: int, a: service.Acteur = Depends(acteur), db: Session = Depends(get_db)):
+    """Même vue que l'écran du livreur (carte, ordre, pointages), pour le suivi en direct.
+    Elle contient les digicodes : la consultation est tracée (au plus une fois par heure)."""
     tournee = db.get(Tournee, tournee_id)
     if tournee is None:
         raise HTTPException(404, "Tournée introuvable.")
+    tracer_consultation(db, a.utilisateur, a.ctx, tournee.id)
     return vue_tournee(db, tournee)
 
 

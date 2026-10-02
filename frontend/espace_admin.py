@@ -21,7 +21,8 @@ PERIODES = {"Matin (7 h – 14 h)": "matin", "Après-midi (13 h – 19 h)": "apr
 EVENEMENTS = ["(tous)", "CONNEXION_ANORMALE", "CONNEXION_ECHEC", "CONNEXION_REUSSIE", "COMPTE_VERROUILLE",
               "ACCES_REFUSE", "IMPORT_CSV", "ADMIN_CREATION_COMPTE", "ADMIN_DESACTIVER",
               "ADMIN_REINITIALISER_MDP", "ADMIN_REINITIALISER_2FA", "ADMIN_ATTRIBUTION_TOURNEE",
-              "ADMIN_CORRECTION_CLIENT", "RGPD_EXPORT", "RGPD_ANONYMISATION", "AJOUT_CLIENT_VOLEE"]
+              "ADMIN_CORRECTION_CLIENT", "RGPD_EXPORT", "RGPD_ANONYMISATION", "AJOUT_CLIENT_VOLEE",
+              "CONSULTATION_TOURNEE"]
 
 outils = None          # fourni par app.py : appel_api, reinitialiser, carte_tournee, heure_locale
 
@@ -122,7 +123,7 @@ def onglet_tableau_de_bord() -> None:
                 "Clients": f"{t['clients']} / {t['limite']}", "Pointés": t["faites"],
                 "Remplissage (%)": t["remplissage"],
                 "km": nombre_fr(t["distance_km"]) if t["distance_km"] is not None else "—"} for t in reversed(td["par_tournee"])]),
-                hide_index=True, use_container_width=True, height=260)
+                hide_index=True, width="stretch", height=260)
     else:
         st.info("Aucune tournée sur la période.")
     st.caption("Le pointage sert à améliorer l'estimation des temps de livraison, pas à évaluer "
@@ -143,7 +144,7 @@ def onglet_tournees() -> None:
             "Clients": f"{t['nb_clients']} / {t['max_clients']}", "Pointés": t["nb_terminees"],
             "À reporter": t["nb_a_reporter"], "Optimisée": "oui" if t["optimisee"] else "non",
             "km": nombre_fr(t["distance_totale_km"]) if t["distance_totale_km"] is not None else "—"}
-            for t in tournees]), hide_index=True, use_container_width=True)
+            for t in tournees]), hide_index=True, width="stretch")
         choix = st.selectbox("Suivre une tournée", tournees, index=None, placeholder="Choisir un livreur",
                              format_func=lambda t: f"{t['livreur_nom']} — {t['nb_clients']} clients")
         if choix:
@@ -167,7 +168,7 @@ def suivi_tournee(resume: dict) -> None:
         "Arrivée": outils.heure_locale(l["heure_debut_livraison"]),
         "Sur place (min)": round(l["temps_service_reel_s"] / 60) if l["temps_service_reel_s"] else None,
         "Prédit (min)": round(l["temps_service_predit_s"] / 60) if l["temps_service_predit_s"] else None,
-    } for l in t["livraisons"]]), hide_index=True, use_container_width=True)
+    } for l in t["livraisons"]]), hide_index=True, width="stretch")
     if resume["statut"] != "terminee":
         with st.form(f"ajout_existant_{resume['id']}", clear_on_submit=True):
             st.write("Ajouter un client déjà enregistré à cette tournée")
@@ -196,7 +197,7 @@ def formulaire_tournee(jour: date) -> None:
                              help="Pré-rempli avec les clients du dernier import. Un client de l'onglet "
                                   "Clients peut aussi être ajouté par son identifiant.")
         remplacer = st.checkbox("Remplacer la tournée existante de ce livreur (si elle n'a pas commencé)")
-        valider = st.form_submit_button("Attribuer la tournée", type="primary", use_container_width=True)
+        valider = st.form_submit_button("Attribuer la tournée", type="primary", width="stretch")
     if valider:
         ids = [x.strip() for x in texte.replace(",", "\n").splitlines() if x.strip()]
         if not ids:
@@ -259,7 +260,7 @@ def onglet_import() -> None:
         if bilan["rejets"]:
             st.dataframe(pd.DataFrame(bilan["rejets"]).rename(columns={
                 "ligne": "Ligne", "id_client": "Identifiant", "motif": "Motif du rejet"}),
-                hide_index=True, use_container_width=True)
+                hide_index=True, width="stretch")
         if bilan["ids_valides"]:
             st.info(f"{len(bilan['ids_valides'])} client(s) prêts : ils sont pré-remplis dans "
                     "« Tournées du jour » pour l'attribution.")
@@ -285,7 +286,7 @@ def onglet_livreurs() -> None:
         "Actif": c["actif"], "2FA": c["totp_active"], "Verrouillé": c["verrouille"],
         "Camion": f"{c['vehicule']} ({c['type_camion']})" if c["vehicule"] else "—",
         "Dernière connexion": date_heure(c["derniere_connexion"])} for c in comptes]),
-        hide_index=True, use_container_width=True)
+        hide_index=True, width="stretch")
 
     col1, col2 = st.columns(2)
     with col1, st.form("creer_compte", clear_on_submit=True):
@@ -323,18 +324,18 @@ def gerer_compte(c: dict, vehicules: list[dict]) -> None:
                 st.session_state.mdp_a_transmettre = (c["identifiant"], res["mot_de_passe_temporaire"])
             annoncer("success", message)
 
-    if c["verrouille"] and st.button("Déverrouiller", use_container_width=True):
+    if c["verrouille"] and st.button("Déverrouiller", width="stretch"):
         action("deverrouiller", f"{c['identifiant']} déverrouillé.")
     confirme = st.checkbox("Je confirme l'action sensible ci-dessous", key=f"confirme_{c['id']}")
     if c["actif"]:
-        if st.button("Désactiver le compte", disabled=not confirme, use_container_width=True):
+        if st.button("Désactiver le compte", disabled=not confirme, width="stretch"):
             action("desactiver", f"{c['identifiant']} désactivé : ses sessions sont coupées.")
-    elif st.button("Réactiver le compte", use_container_width=True):
+    elif st.button("Réactiver le compte", width="stretch"):
         action("reactiver", f"{c['identifiant']} réactivé.")
-    if st.button("Réinitialiser le mot de passe", disabled=not confirme, use_container_width=True):
+    if st.button("Réinitialiser le mot de passe", disabled=not confirme, width="stretch"):
         action("reinitialiser-mdp", f"Mot de passe de {c['identifiant']} réinitialisé.")
     if st.button("Réinitialiser la double authentification (téléphone perdu)", disabled=not confirme,
-                 use_container_width=True):
+                 width="stretch"):
         action("reinitialiser-2fa", f"2FA de {c['identifiant']} réinitialisée : nouveau QR code à la "
                                     "prochaine connexion.")
     if c["role"] == "livreur":
@@ -343,7 +344,7 @@ def gerer_compte(c: dict, vehicules: list[dict]) -> None:
         vehicule = st.selectbox("Camion attribué", options, index=actuel, key=f"vehicule_{c['id']}",
                                 format_func=lambda v: "aucun" if v is None else
                                 f"{v['immatriculation']} ({v['type_camion']})")
-        if st.button("Affecter ce camion", use_container_width=True):
+        if st.button("Affecter ce camion", width="stretch"):
             if api("POST", f"/admin/utilisateurs/{c['id']}/vehicule",
                    json={"vehicule_id": vehicule["id"] if vehicule else None}):
                 annoncer("success", f"Camion de {c['identifiant']} mis à jour.")
@@ -398,7 +399,7 @@ def recherche_et_rgpd() -> None:
     st.dataframe(pd.DataFrame([{
         "Identifiant": c["id_client"], "Nom": c["nom"], "Adresse": c["adresse"], "Zone": c["zone"],
         "Camion": c["type_camion_requis"], "Précision": c["precision"], "Source": c["source"],
-        "Actif": c["actif"]} for c in clients]), hide_index=True, use_container_width=True)
+        "Actif": c["actif"]} for c in clients]), hide_index=True, width="stretch")
     client = st.selectbox("Client", clients, index=None, placeholder="Choisir pour exercer un droit RGPD",
                           format_func=lambda c: f"{c['id_client']} — {c['nom']}")
     if not client:
@@ -406,7 +407,7 @@ def recherche_et_rgpd() -> None:
     st.write("**Droits RGPD** (chaque action est inscrite au journal de sécurité)")
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("Préparer l'export des données", use_container_width=True):
+        if st.button("Préparer l'export des données", width="stretch"):
             export = api("GET", f"/admin/clients/{client['id_client']}/export")
             if export:
                 st.session_state.export_rgpd = export
@@ -414,7 +415,7 @@ def recherche_et_rgpd() -> None:
         if export and export["id_client"] == client["id_client"]:
             st.download_button("Télécharger (JSON)", json.dumps(export, ensure_ascii=False, indent=2),
                                file_name=f"export_client_{client['id_client']}.json",
-                               mime="application/json", use_container_width=True)
+                               mime="application/json", width="stretch")
             st.caption("Contient des données personnelles déchiffrées : à transmettre uniquement à la "
                        "personne concernée, puis à supprimer.")
     with col2:
@@ -422,7 +423,7 @@ def recherche_et_rgpd() -> None:
             confirmation = st.text_input("Ressaisir l'identifiant pour anonymiser (irréversible)",
                                          max_chars=10, key=f"anonymiser_{client['id_client']}")
             if st.button("Anonymiser le client", disabled=confirmation != client["id_client"],
-                         use_container_width=True):
+                         width="stretch"):
                 if api("POST", f"/admin/clients/{client['id_client']}/anonymiser",
                        json={"confirmation": confirmation}):
                     st.session_state.pop("export_rgpd", None)
@@ -442,7 +443,7 @@ def onglet_securite() -> None:
             "Date": date_heure(a["horodatage"]), "Compte": a["identifiant_saisi"], "IP": a["adresse_ip"],
             "Raisons": ", ".join((a["details"] or {}).get("raisons", [])),
             "Score": (a["details"] or {}).get("score")} for a in alertes]),
-            hide_index=True, use_container_width=True)
+            hide_index=True, width="stretch")
     elif alertes is not None:
         st.success("Aucune connexion anormale récente.")
 
@@ -456,7 +457,7 @@ def onglet_securite() -> None:
         "Date": date_heure(e["horodatage"]), "Événement": e["evenement"], "Succès": e["succes"],
         "Compte": e["identifiant_saisi"], "IP": e["adresse_ip"],
         "Détails": ", ".join(f"{k}={v}" for k, v in (e["details"] or {}).items())} for e in lignes]),
-        hide_index=True, use_container_width=True)
+        hide_index=True, width="stretch")
     st.caption("Journal en ajout seul : la base refuse toute modification et toute suppression "
                "d'une entrée de moins d'un an.")
 

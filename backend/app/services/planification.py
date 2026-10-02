@@ -1,4 +1,5 @@
 """Passage des données de la base (clients, zone, flotte) aux problèmes d'optimisation."""
+import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -12,6 +13,8 @@ from app.optim.cvrptw import optimiser_tournees
 from app.optim.matrice import Point, construire_matrice_depart
 from app.optim.probleme import ClientTournee, ParcoursEvalue, ProblemeTournees, en_secondes
 from app.optim.segmentation import Periode, Segment, dimensionner, repartir_budget, segmenter
+
+journal_technique = logging.getLogger(__name__)   # erreurs techniques (logs du conteneur)
 
 
 def temps_service_theorique_s(client: Client, reglages: Settings) -> int:
@@ -53,7 +56,7 @@ def estimer_temps_service_s(clients: list[Client], reglages: Settings) -> tuple[
         try:
             return p.predire_s([variables_client(c, depot) for c in clients]), "modele"
         except Exception:      # modèle incompatible : l'optimisation doit toujours fonctionner
-            pass
+            journal_technique.warning("Modèle de temps de service inutilisable : valeurs fixes", exc_info=True)
     return [temps_service_theorique_s(c, reglages) for c in clients], "fixe"
 
 

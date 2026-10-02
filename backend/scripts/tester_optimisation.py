@@ -32,7 +32,7 @@ def choisir_clients(source: str, zone: str | None, nombre: int, graine: int) -> 
         candidats = db.scalars(requete.order_by(Client.id_client)).all()
     if len(candidats) < nombre:
         sys.exit(f"Seulement {len(candidats)} clients disponibles pour ces critères.")
-    tirage = random.Random(graine).sample(candidats, nombre)
+    tirage = random.Random(graine).sample(candidats, nombre)  # tirage de simulation reproductible (graine), sans usage de sécurité  # nosec B311
     return sorted(tirage, key=lambda c: c.id_client)      # ordre de saisie = ordre naïf
 
 

@@ -152,7 +152,7 @@ def notes_pour(rng: random.Random, immeuble, etage, ascenseur, pro: bool,
 
 
 def generer(nb: int, graine: int) -> None:
-    rng = random.Random(graine)   # graine fixe : jeu reproductible d'une exécution à l'autre
+    rng = random.Random(graine)  # tirage de simulation reproductible (graine), sans usage de sécurité  # nosec B311
     with SessionLocal() as db:
         deja = db.scalar(select(func.count()).where(Client.source == SourceClient.SIMULATION))
         if deja:
@@ -218,7 +218,7 @@ def generer(nb: int, graine: int) -> None:
 def refaire_notes(graine: int) -> None:
     """Retire au sort les notes des clients simulés existants, avec les fréquences mesurées sur les
     clients réels. Identifiants, positions, créneaux et tournées existantes sont conservés."""
-    rng = random.Random(graine)
+    rng = random.Random(graine)  # tirage de simulation reproductible (graine), sans usage de sécurité  # nosec B311
     with SessionLocal() as db:
         taux = taux_consignes(db)
         clients = db.scalars(select(Client).where(Client.source == SourceClient.SIMULATION)

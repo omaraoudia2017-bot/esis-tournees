@@ -111,7 +111,7 @@ RECONNEXION = {"livreur": 0.35, "admin": 0.6}
 def historique_simule(nb_comptes: int = 30, nb_jours: int = 60, graine: int = 42,
                       fuseau: str = "Europe/Paris") -> list[dict[str, float]]:
     """Connexions normales simulées, déjà transformées en variables."""
-    rng = random.Random(graine)
+    rng = random.Random(graine)  # tirage de simulation reproductible (graine), sans usage de sécurité  # nosec B311
     tz = ZoneInfo(fuseau)
     origine = datetime(2026, 1, 5, tzinfo=tz)              # un lundi
     lignes = []
@@ -157,7 +157,7 @@ def historique_simule(nb_comptes: int = 30, nb_jours: int = 60, graine: int = 42
 
 def attaques_simulees(nb: int = 200, graine: int = 7) -> list[dict[str, float]]:
     """Connexions suspectes typiques, pour mesurer le taux de détection (jamais pour entraîner)."""
-    rng = random.Random(graine)
+    rng = random.Random(graine)  # tirage de simulation reproductible (graine), sans usage de sécurité  # nosec B311
     lignes = []
     for _ in range(nb):
         heure = rng.choice([rng.uniform(0, 4.5), rng.uniform(22, 24)])

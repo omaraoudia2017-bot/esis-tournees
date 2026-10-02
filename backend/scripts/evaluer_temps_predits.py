@@ -63,7 +63,7 @@ def main(args) -> None:
     if source != "modele":
         sys.exit("Aucun modèle de temps de service actif : lancez d'abord scripts.entrainer_modele.")
 
-    rng = random.Random(args.graine)
+    rng = random.Random(args.graine)  # tirage de simulation reproductible (graine), sans usage de sécurité  # nosec B311
     resultats = {"fixe": [], "modele": []}
     for k in range(args.tournees):
         clients = rng.sample(candidats, args.nombre)

@@ -41,7 +41,7 @@ def charger(source: str, nom_zone: str, nombre: int, graine: int) -> tuple[list[
         candidats = db.scalars(requete.order_by(Client.id_client)).all()
     if len(candidats) < nombre:
         sys.exit(f"Seulement {len(candidats)} clients disponibles dans cette zone.")
-    return sorted(random.Random(graine).sample(candidats, nombre), key=lambda c: c.id_client), zone
+    return sorted(random.Random(graine).sample(candidats, nombre), key=lambda c: c.id_client), zone  # tirage de simulation reproductible (graine), sans usage de sécurité  # nosec B311
 
 
 def main(args) -> None:

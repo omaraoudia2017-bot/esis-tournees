@@ -15,7 +15,7 @@ from app.schemas.tournee import (ClientVue, DemandeAjoutClient, DemandeFin, Livr
                                  ReponseAjout, ReponseOptimisation, TourneeVue)
 from app.services import tournees as service
 from app.services.geocodage import Geocodeur
-from app.services.journal import contexte_depuis, journaliser
+from app.services.journal import contexte_depuis, journaliser, tracer_consultation
 
 router = APIRouter(tags=["Tournée du livreur"])
 livreur_connecte = exiger_role(RoleUtilisateur.LIVREUR)
@@ -82,12 +82,16 @@ def _livraison_autorisee(request: Request, db: Session, livraison_id: int, u: Ut
 
 
 @router.get("/tournees/du-jour", response_model=TourneeVue)
-def tournee_du_jour(u: Utilisateur = Depends(livreur_connecte), db: Session = Depends(get_db)):
-    """Liste des clients de la tournée du jour du livreur connecté (et de lui seul)."""
+def tournee_du_jour(request: Request, u: Utilisateur = Depends(livreur_connecte),
+                    db: Session = Depends(get_db)):
+    """Liste des clients de la tournée du jour du livreur connecté (et de lui seul).
+    L'accès aux digicodes et téléphones est tracé au journal (au plus une fois par heure)."""
     try:
-        return vue_tournee(db, service.tournee_du_jour(db, u, get_settings()))
+        tournee = service.tournee_du_jour(db, u, get_settings())
     except service.ErreurTournee as e:
         raise _http(e) from None
+    tracer_consultation(db, u, contexte_depuis(request), tournee.id)
+    return vue_tournee(db, tournee)
 
 
 @router.post("/tournees/du-jour/optimiser", response_model=ReponseOptimisation)

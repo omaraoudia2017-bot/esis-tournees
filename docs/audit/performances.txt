@@ -1,0 +1,35 @@
+﻿Limite de calcul configur├®e (bouton Optimiser) : 5 s ; budget journ├®e : 9.0 s
+
+1. Une tourn├®e (1 camion normal, cr├®neaux, temps de service pr├®dits)
+--------------------------------------------------------------------
+Clients  Limite   Calcul      km  Retards  Non servis
+     10     1 s   1.01 s    49.1        0           0
+     10     2 s   2.00 s    49.1        0           0
+     10     5 s   5.00 s    49.1        0           0
+     15     1 s   1.00 s    74.3        0           0
+     15     2 s   2.00 s    74.3        0           0
+     15     5 s   5.00 s    74.3        0           0
+     20     1 s   1.00 s    91.6        0           0
+     20     2 s   2.00 s    91.6        0           0
+     20     5 s   5.00 s    91.6        0           0
+
+2. Journ├®e compl├¿te, zone ┬½ Lyon - Villeurbanne ┬╗ (20 % de palettes, matin / apr├¿s-midi / soir├®e)
+-------------------------------------------------------------------------------------------------
+Clients  Tourn├®es   Calcul   Servis  Retards  Camion inadapt├®  Limite d├®pass├®e
+     60         8   9.26 s   60/60         1                0                0
+    120        12   9.27 s  120/120        0                0                0
+    200        18   9.36 s  200/200        1                0                0
+Flotte disponible : {'hayon': 4, 'normal': 10}
+
+3. Mod├¿le de temps de service sur tout le jeu simul├®
+----------------------------------------------------
+5000 clients estim├®s en 0.33 s (source : modele), m├®diane 9.2 min
+
+4. Requ├¬tes de l'espace administrateur
+--------------------------------------
+Recherche ┬½ RUE ┬╗ sur 5 000+ clients (500 r├®sultats, limite 500) : 28 ms
+Tableau de bord 90 jours (43 tourn├®es, 504 livraisons) : 42 ms
+
+5. Temps de r├®ponse de l'API (GET /health, base comprise)
+---------------------------------------------------------
+50 appels : m├®diane 3.7 ms, 95e centile 6.1 ms, max 54.7 ms

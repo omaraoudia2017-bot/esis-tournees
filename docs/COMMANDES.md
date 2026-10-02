@@ -83,7 +83,7 @@ docker compose logs --tail 50
 
 ## 4. Tests
 
-Tous les tests (135 attendus) :
+Tous les tests (146 attendus) :
 
 ```powershell
 docker compose exec api python -m pytest -q
@@ -111,6 +111,18 @@ Un seul test par son nom :
 
 ```powershell
 docker compose exec api python -m pytest -k cloisonnement -v
+```
+
+Audits de sécurité et performance (résultats dans `docs\audit`, synthèse dans `docs/RAPPORT_TESTS.md`) :
+
+```powershell
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
+docker compose exec -T api python -m pytest tests/test_intrusion.py -v
+docker compose exec -T api bandit -r app scripts | Out-File -Encoding utf8 docs\audit\bandit.txt
+docker compose exec -T api pip-audit --desc | Out-File -Encoding utf8 docs\audit\pip-audit-api.txt
+docker compose cp frontend/requirements.txt api:/tmp/front.txt
+docker compose exec -T api pip-audit -r /tmp/front.txt --desc | Out-File -Encoding utf8 docs\audit\pip-audit-front.txt
+docker compose exec -T api python -m scripts.mesurer_performances | Out-File -Encoding utf8 docs\audit\performances.txt
 ```
 
 ## 5. Démonstration

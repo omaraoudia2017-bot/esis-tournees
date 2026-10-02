@@ -25,7 +25,7 @@ from app.services.anomalies import connexions_reelles_detaillees
 def main(args) -> None:
     reglages = get_settings()
     normales = historique_simule(args.comptes, args.jours, args.graine, reglages.fuseau_horaire)
-    random.Random(args.graine).shuffle(normales)
+    random.Random(args.graine).shuffle(normales)  # tirage de simulation reproductible (graine), sans usage de sécurité  # nosec B311
     coupure = int(len(normales) * 0.8)
     apprentissage, controle = normales[:coupure], normales[coupure:]
     with SessionLocal() as db:

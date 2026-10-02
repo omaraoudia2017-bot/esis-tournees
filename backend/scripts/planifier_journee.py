@@ -39,7 +39,7 @@ def charger(zone_nom: str, nombre: int, part_hayon: float, graine: int):
                 Client.source == SourceClient.SIMULATION, Client.type_camion_requis == type_camion,
             ).order_by(Client.id_client)).all()
 
-        rng = random.Random(graine)
+        rng = random.Random(graine)  # tirage de simulation reproductible (graine), sans usage de sécurité  # nosec B311
         nb_hayon = round(nombre * part_hayon)
         hayon, normal = candidats(TypeCamion.HAYON), candidats(TypeCamion.NORMAL)
         if len(hayon) < nb_hayon or len(normal) < nombre - nb_hayon:

@@ -82,7 +82,7 @@ def temps_simule_min(v: dict[str, Any], rng: random.Random, h: dict[str, float] 
 def historique_simule(variables_clients: list[dict[str, Any]], nb_passages: int,
                       graine: int = 42) -> tuple[list[dict], list[float]]:
     """nb_passages livraisons tirées parmi les clients (un client peut être livré plusieurs fois)."""
-    rng = random.Random(graine)
+    rng = random.Random(graine)  # tirage de simulation reproductible (graine), sans usage de sécurité  # nosec B311
     X, y = [], []
     for _ in range(nb_passages):
         v = rng.choice(variables_clients)

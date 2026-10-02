@@ -1,5 +1,6 @@
-streamlit==1.40.2
-requests==2.32.3
+streamlit==1.64.0
+requests==2.34.2
 folium==0.18.0
 streamlit-folium==0.23.2
+pillow==12.3.0
 tzdata==2024.2
