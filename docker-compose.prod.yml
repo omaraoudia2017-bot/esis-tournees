@@ -1,0 +1,55 @@
+# Configuration de PRODUCTION, à superposer à docker-compose.yml :
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# Différences avec le développement :
+#   - HTTPS : seul le proxy Caddy est accessible (certificat automatique) ; base, API et interface ne
+#     sont plus publiées, elles ne communiquent que sur le réseau interne Docker ;
+#   - ENVIRONMENT=prod : documentation Swagger /docs désactivée ;
+#   - code intégré aux images (aucun dossier source monté), pas de rechargement à chaud ;
+#   - redémarrage automatique des services (restart: always).
+# Une mise à jour du code impose donc de reconstruire les images (--build).
+
+services:
+  db:
+    restart: always
+    ports: !reset []
+
+  api:
+    restart: always
+    environment:
+      ENVIRONMENT: prod
+    volumes: !override
+      - ./backend/modeles:/app/modeles   # modèles entraînés (temps de service, anomalies)
+    ports: !reset []
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --no-server-header
+
+  frontend:
+    restart: always
+    environment:
+      ESIS_DERRIERE_PROXY: "1"                      # IP réelle du client transmise au journal
+      STREAMLIT_SERVER_RUN_ON_SAVE: "false"
+      STREAMLIT_SERVER_FILE_WATCHER_TYPE: "none"
+      STREAMLIT_CLIENT_SHOW_ERROR_DETAILS: "false"  # pas de trace technique affichée à l'écran
+    volumes: !reset []
+    ports: !reset []
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: esis_https
+    restart: always
+    depends_on:
+      - frontend
+    environment:
+      ESIS_DOMAINE: ${ESIS_DOMAINE:-localhost}
+    ports:
+      - "${ESIS_PORT_HTTPS:-8443}:443"
+      - "${ESIS_PORT_HTTP:-8080}:80"
+    volumes:
+      - ./deploiement/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data          # certificats (à conserver)
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

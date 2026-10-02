@@ -9,12 +9,14 @@ Usage :
     docker compose exec api python -m scripts.gerer_utilisateurs deverrouiller --identifiant livreur.demo
     docker compose exec api python -m scripts.gerer_utilisateurs reinitialiser-2fa --identifiant livreur.demo
     docker compose exec api python -m scripts.gerer_utilisateurs desactiver --identifiant livreur.demo
+    docker compose exec api python -m scripts.gerer_utilisateurs reinitialiser-mdp --identifiant admin.omar
 
 Chaque action est tracée dans le journal de sécurité.
 """
 import argparse
 import getpass
 import sys
+from datetime import datetime, timezone
 
 from sqlalchemy import delete, func, select
 
@@ -91,6 +93,14 @@ def modifier(args, action: str) -> None:
             db.execute(delete(CodeSecours).where(CodeSecours.utilisateur_id == u.id))
         elif action == "desactiver":
             u.actif = False
+            u.sessions_invalidees_le = datetime.now(timezone.utc)
+        elif action == "reinitialiser-mdp":       # mot de passe oublié (y compris d'un administrateur)
+            mdp = generer_mdp() if args.generer_mdp else demander_mdp()
+            u.mot_de_passe_hash = hacher_mdp(mdp)
+            u.verrouille_jusqua, u.tentatives_echec = None, 0
+            u.sessions_invalidees_le = datetime.now(timezone.utc)   # anciennes sessions coupées
+            if args.generer_mdp:
+                print(f"Nouveau mot de passe (affiché une seule fois) : {mdp}")
         journaliser(db, f"ADMIN_{action.upper().replace('-', '_')}", True, None, u.id,
                     u.identifiant, source="cli")
         db.commit()
@@ -111,6 +121,9 @@ if __name__ == "__main__":
     sous.add_parser("lister")
     for nom in ("deverrouiller", "reinitialiser-2fa", "desactiver"):
         sous.add_parser(nom).add_argument("--identifiant", required=True)
+    p = sous.add_parser("reinitialiser-mdp", help="mot de passe oublié (2FA conservée)")
+    p.add_argument("--identifiant", required=True)
+    p.add_argument("--generer-mdp", action="store_true", help="génère un mot de passe robuste")
 
     args = parser.parse_args()
     if args.commande == "creer":

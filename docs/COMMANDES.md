@@ -41,6 +41,16 @@ Arrêter les conteneurs (les données sont conservées) :
 docker compose down
 ```
 
+Mode production (HTTPS sur https://localhost:8443, seul point d'entrée) puis retour au développement :
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.prod.yml down
+docker compose up -d
+```
+
+> Ne jamais ajouter `-v` à `down` : cela supprimerait la base.
+
 Reconstruire après un changement de `requirements.txt` ou de `Dockerfile` :
 
 ```powershell
@@ -204,6 +214,12 @@ Créer un administrateur (le mot de passe est demandé au clavier) :
 docker compose exec api python -m scripts.gerer_utilisateurs creer --identifiant admin.test --nom TEST --prenom Admin --role admin
 ```
 
+Mot de passe oublié (y compris administrateur ; la 2FA est conservée) :
+
+```powershell
+docker compose exec api python -m scripts.gerer_utilisateurs reinitialiser-mdp --identifiant admin.omar
+```
+
 Désactiver un compte :
 
 ```powershell
@@ -313,12 +329,21 @@ docker compose exec api python -m app.db.init_db
 
 > **Attention :** `init_db --reset` efface TOUTE la base (clients géocodés, comptes, tournées). Ne pas l'utiliser.
 
-Sauvegarder la base hors du projet (le fichier contient des données personnelles : jamais dans Git) :
+Sauvegarder la base hors du projet (dans `Documents\ESIS_sauvegardes`, empreinte SHA-256, 14 conservées ;
+le fichier contient des données personnelles : jamais dans Git) :
 
 ```powershell
-docker compose exec db pg_dump -U esis -d esis -F c -f /tmp/esis.dump
-docker cp esis_db:/tmp/esis.dump "$HOME\Documents\esis_$(Get-Date -Format yyyyMMdd).dump"
+powershell -ExecutionPolicy Bypass -File exploitation\sauvegarder.ps1
 ```
+
+Tester la dernière sauvegarde (restauration dans une base temporaire, sans risque) :
+
+```powershell
+$f = (Get-ChildItem "$HOME\Documents\ESIS_sauvegardes\esis_*.dump" | Sort-Object Name | Select-Object -Last 1).FullName
+powershell -ExecutionPolicy Bypass -File exploitation\restaurer.ps1 -Fichier $f -Test
+```
+
+> Restauration réelle (après incident uniquement) : même commande sans `-Test`, confirmation « RESTAURER ».
 
 ## 9. Données
 

@@ -75,6 +75,15 @@ docker compose exec api python -m scripts.gerer_utilisateurs lister
 - Interface : http://localhost:8501
 - API : http://localhost:8000/health
 - Documentation interactive (dev uniquement) : http://localhost:8000/docs
+- Production (HTTPS, proxy Caddy) : `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build`
+
+## Documentation
+
+- `docs/DOCUMENTATION_TECHNIQUE.md` : architecture, installation, données, API, sécurité, exploitation
+- `docs/GUIDE_UTILISATEUR.md` : livreur et planificateur
+- `docs/RAPPORT_TESTS.md` : tests fonctionnels, sécurité, audits, performance
+- `docs/COMMANDES.md` : aide-mémoire des commandes
+- `exploitation/` : sauvegarde et restauration de la base
 
 ## Arborescence
 

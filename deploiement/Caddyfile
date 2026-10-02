@@ -1,0 +1,25 @@
+# Proxy HTTPS de l'application ESIS (Caddy).
+# ESIS_DOMAINE = localhost : certificat auto-signé par Caddy (démonstration, avertissement du navigateur).
+# ESIS_DOMAINE = un vrai nom de domaine pointant vers le serveur : certificat Let's Encrypt automatique
+# (ports 80 et 443 ouverts sur Internet).
+
+{$ESIS_DOMAINE} {
+	encode gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+
+	# Interface Streamlit (WebSocket géré automatiquement). L'API n'est jamais exposée directement.
+	reverse_proxy frontend:8501
+
+	log {
+		output stdout
+		format console
+	}
+}

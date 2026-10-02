@@ -21,6 +21,7 @@ import espace_admin
 
 API_URL = os.environ.get("API_URL", "http://api:8000")
 FUSEAU = ZoneInfo(os.environ.get("TZ", "Europe/Paris"))
+DERRIERE_PROXY = os.environ.get("ESIS_DERRIERE_PROXY") == "1"   # production : derrière Caddy (HTTPS)
 
 # Écran large pour l'administrateur (tableaux, carte), étroit pour le livreur (smartphone)
 st.set_page_config(page_title="ESIS Tournées",
@@ -56,6 +57,12 @@ def appel_api(methode: str, chemin: str, jeton: str | None = None, timeout: int 
     navigateur = getattr(st, "context", None) and st.context.headers.get("User-Agent")
     if navigateur:                      # transmis pour le journal de sécurité
         entetes["User-Agent"] = navigateur
+    if DERRIERE_PROXY:
+        # En production, Caddy indique l'adresse IP réelle du client (journal, détection d'anomalies).
+        # Seule la dernière valeur, ajoutée par Caddy lui-même, est retenue (non falsifiable).
+        transmis = st.context.headers.get("X-Forwarded-For")
+        if transmis:
+            entetes["X-Forwarded-For"] = transmis.split(",")[-1].strip()
     try:
         return requests.request(methode, f"{API_URL}{chemin}", headers=entetes, timeout=timeout, **kwargs)
     except requests.RequestException:
