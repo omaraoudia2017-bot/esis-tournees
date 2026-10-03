@@ -9,7 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from app.api import routes_admin, routes_auth, routes_conditions, routes_tournees
+from app.api import routes_admin, routes_auth, routes_conditions, routes_tournees, routes_trajets
 from app.core.config import get_settings
 from app.db.session import get_db
 
@@ -48,7 +48,7 @@ async def entetes_securite(request: Request, call_next):
             "frame-ancestors 'none'")
         reponse.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     if request.url.path.startswith(("/auth", "/moi", "/tournees", "/livraisons", "/remarques", "/conditions",
-                                     "/admin")):
+                                     "/trajets", "/admin")):
         # jamais de jeton ni de donnée client (digicode, téléphone) dans un cache
         reponse.headers["Cache-Control"] = "no-store"
     return reponse
@@ -58,6 +58,7 @@ app.include_router(routes_auth.router)
 app.include_router(routes_conditions.router)
 app.include_router(routes_admin.router)
 app.include_router(routes_tournees.router)
+app.include_router(routes_trajets.router)
 
 # Application mobile du livreur (HTML/CSS/JS statiques) : mêmes routes et mêmes contrôles que
 # l'interface Streamlit. http://localhost:8000/livreur/

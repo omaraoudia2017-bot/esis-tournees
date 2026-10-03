@@ -18,7 +18,7 @@
 	# Application mobile du livreur et SEULES les routes dont elle a besoin. Les routes /admin,
 	# /docs et la documentation de l'API ne sont jamais exposées : l'espace planificateur passe
 	# par l'interface Streamlit, qui appelle l'API sur le réseau interne Docker.
-	@mobile path /livreur /livreur/* /auth/* /conditions /conditions/* /moi/* /tournees/* /livraisons/* /remarques/*
+	@mobile path /livreur /livreur/* /auth/* /conditions /conditions/* /moi/* /tournees/* /livraisons/* /remarques/* /trajets/*
 	handle @mobile {
 		reverse_proxy api:8000
 	}

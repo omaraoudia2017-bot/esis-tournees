@@ -24,7 +24,8 @@ EVENEMENTS = ["(tous)", "CONNEXION_ANORMALE", "CONNEXION_ECHEC", "CONNEXION_REUS
               "ADMIN_REINITIALISER_MDP", "ADMIN_REINITIALISER_2FA", "ADMIN_ATTRIBUTION_TOURNEE",
               "ADMIN_CORRECTION_CLIENT", "RGPD_EXPORT", "RGPD_ANONYMISATION", "AJOUT_CLIENT_VOLEE",
               "CONSULTATION_TOURNEE", "POINTAGE_ANNULE", "REMARQUE_AJOUTEE", "REMARQUE_SUPPRIMEE",
-              "CONDITIONS_ACCEPTEES", "ADMIN_TYPE_LIVREUR", "DOMICILE_MODIFIE", "DOMICILE_SUPPRIME"]
+              "CONDITIONS_ACCEPTEES", "ADMIN_TYPE_LIVREUR", "DOMICILE_MODIFIE", "DOMICILE_SUPPRIME",
+              "TRAJET_ETAPE_AJOUTEE", "TRAJET_ETAPE_SUPPRIMEE", "TRAJETS_OPTIMISES"]
 
 outils = None          # fourni par app.py : appel_api, reinitialiser, carte_tournee, heure_locale
 
@@ -153,8 +154,34 @@ def onglet_tournees() -> None:
             suivi_tournee(choix)
     else:
         st.info("Aucune tournée ce jour-là.")
+    journees_de_trajets(jour)
     st.divider()
     formulaire_tournee(jour)
+
+
+POINTS = {"depot": "Dépôt", "domicile": "Domicile"}
+
+
+def journees_de_trajets(jour: date) -> None:
+    """Lecture seule : étapes saisies par les livreurs qui n'ont pas de tournée ce jour-là."""
+    journees = api("GET", "/admin/trajets", params={"date": jour.isoformat()})
+    if not journees:
+        return
+    st.subheader(f"Journées de trajets, sans tournée ({len(journees)})")
+    st.caption("Étapes saisies par le livreur lui-même (garage, contrôle technique…). Consultation seule.")
+    for j in journees:
+        resume = (f"{j['livreur_nom']} — {len(j['etapes'])} étape(s), {j['nb_faites']} faite(s) — "
+                  f"{POINTS.get(j['depart'], j['depart'])} {j['heure_depart'][:5]} → "
+                  f"{POINTS.get(j['retour'], j['retour'])}")
+        if j["optimisee"] and j["distance_km"] is not None:
+            resume += f" — {nombre_fr(j['distance_km'])} km"
+        with st.expander(resume):
+            st.dataframe(pd.DataFrame([{
+                "N°": e["ordre"], "Étape": e["libelle"], "Adresse": e["adresse"],
+                "Rendez-vous": f"{e['rdv_debut'][:5]}–{e['rdv_fin'][:5]}" if e["rdv_debut"] else "",
+                "Sur place (min)": e["duree_min"], "Prévu": outils.heure_locale(e["heure_prevue"]),
+                "Fait à": outils.heure_locale(e["faite_le"])} for e in j["etapes"]]),
+                hide_index=True, width="stretch")
 
 
 def suivi_tournee(resume: dict) -> None:

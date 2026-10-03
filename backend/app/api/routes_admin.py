@@ -24,9 +24,11 @@ from app.schemas.admin import (BilanGeocodageVue, ClientResume, CompteVue, Deman
                                TourneeResume, VehiculeVue)
 from app.schemas.auth import EvenementJournal
 from app.schemas.tournee import RemarqueVue, TourneeVue
+from app.schemas.trajets import EtapePlanificateur, JourneePlanificateur
 from app.services import admin as service
 from app.services import import_csv
 from app.services import remarques as remarques_service
+from app.services import trajets as trajets_service
 from app.services.geocodage import Geocodeur
 from app.services.journal import contexte_depuis, tracer_consultation
 
@@ -219,6 +221,23 @@ def ajouter_client_existant(tournee_id: int, demande: DemandeAjoutExistant,
 
 
 # --------------------------------------------------------------------------- clients et RGPD
+# --------------------------------------------------------------------------- journées de trajets (lecture seule)
+@router.get("/trajets", response_model=list[JourneePlanificateur])
+def journees_de_trajets(jour: date | None = Query(None, alias="date"), db: Session = Depends(get_db)):
+    """Étapes saisies par les livreurs sans tournée. Lecture seule : le planificateur ne voit ni la
+    position ni l'adresse du domicile, seulement « Dépôt » ou « Domicile »."""
+    jour = jour or service.aujourdhui(get_settings())
+    return [JourneePlanificateur(
+        livreur=u.identifiant, livreur_nom=f"{u.prenom} {u.nom}", depart=j.depart, retour=j.retour,
+        heure_depart=j.heure_depart, optimisee=j.optimisee_le is not None,
+        distance_km=float(j.distance_km) if j.distance_km is not None else None, duree_min=j.duree_min,
+        nb_faites=sum(e.faite_le is not None for e in etapes),
+        etapes=[EtapePlanificateur(ordre=e.ordre, libelle=e.libelle, adresse=e.adresse, rdv_debut=e.rdv_debut,
+                                   rdv_fin=e.rdv_fin, duree_min=e.duree_min, heure_prevue=e.heure_prevue,
+                                   faite_le=e.faite_le) for e in etapes],
+    ) for j, u, etapes in trajets_service.journees_du(db, jour)]
+
+
 @router.get("/clients", response_model=list[ClientResume])
 def rechercher_clients(recherche: str | None = Query(None, max_length=100),
                        a_corriger: bool = False, limite: int = Query(50, ge=1, le=500),

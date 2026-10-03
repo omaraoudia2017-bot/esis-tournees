@@ -28,6 +28,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 
 html, body { margin: 0; height: 100%; }
 
@@ -90,7 +91,7 @@ p { margin: 0; }
 
 /* ---------- formulaires ---------- */
 label.champ { display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 500; }
-input[type="text"], input[type="password"], textarea {
+input[type="text"], input[type="password"], input[type="time"], input[type="number"], textarea {
   height: 48px; border: 1px solid var(--bord-fort); border-radius: 12px; padding: 0 14px;
   font-size: 16px; background: #FFFFFF; color: var(--encre); font-family: inherit; width: 100%; min-width: 0;
 }
@@ -193,3 +194,9 @@ button:disabled { cursor: not-allowed; }
 .qr { width: 200px; height: 200px; align-self: center; image-rendering: pixelated; border-radius: 8px; background: #FFFFFF; padding: 6px; }
 .codes { font-family: Consolas, "Courier New", monospace; font-size: 15px; background: #FFFFFF; border: 1px solid var(--bord); border-radius: 12px; padding: 12px 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 .chargement { padding: 30px; text-align: center; color: var(--gris); }
+
+/* ---------- journée de trajets ---------- */
+.reglage { display: flex; flex-direction: column; gap: 4px; }
+.grille-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.puces { display: flex; flex-wrap: wrap; gap: 6px; margin-top: -4px; }
+.puce { min-height: 34px; border: 1px solid var(--bord-fort); border-radius: 17px; background: #FFFFFF; color: var(--gris-fonce); padding: 0 12px; font-size: 13px; font-weight: 500; }

@@ -65,6 +65,10 @@ class Settings(BaseSettings):
     # Changer la version oblige chaque livreur à relire et accepter le nouveau texte.
     conditions_version: str = "1.1"
 
+    # Journée de trajets (jours sans tournée) : étapes saisies par le livreur
+    trajets_max_etapes: int = 15
+    trajets_duree_defaut_min: int = 15
+
     # Écran du livreur : annulation d'un clic Démarrer / Terminer fait par erreur
     delai_annulation_pointage_min: int = 10
     # Remarques sur une adresse : nombre de remarques récentes affichées au livreur

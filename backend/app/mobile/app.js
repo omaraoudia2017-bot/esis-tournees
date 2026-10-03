@@ -25,7 +25,10 @@ const etat = {
   ecran: "connexion", jeton: null, preauth: null, expireLe: null, profil: null, tournee: null,
   message: null, messageConnexion: null, enrolement: null, codesSecours: null, conditions: null,
   lectureConditions: false, issue: {}, remarqueOuverte: null, occupe: false, calcul: false, domicile: null,
+  trajets: null, aSupprimer: null,
 };
+const POINTS = { depot: "Dépôt", domicile: "Domicile" };
+const IDEES_ETAPES = ["Garage", "Contrôle technique", "Récupérer une pièce", "Station de lavage"];
 
 // --------------------------------------------------------------------------- outils DOM
 function h(balise, attributs, ...enfants) {
@@ -109,7 +112,7 @@ function annoncer(type, texte) { etat.message = { type, texte }; }
 function deconnexionLocale(message) {
   Object.assign(etat, { ecran: "connexion", jeton: null, preauth: null, expireLe: null, profil: null,
     tournee: null, message: null, enrolement: null, codesSecours: null, conditions: null, issue: {},
-    remarqueOuverte: null, domicile: null, messageConnexion: message || null });
+    remarqueOuverte: null, domicile: null, trajets: null, aSupprimer: null, messageConnexion: message || null });
   rendre();
 }
 
@@ -140,8 +143,28 @@ async function chargerTournee() {
   const r = await appel("GET", "/tournees/du-jour");
   if (!r) return;
   etat.tournee = r.status === 200 ? r.data : null;
+  if (r.status === 404) {
+    // Pas de tournée aujourd'hui : on regarde si le livreur a préparé une journée de trajets
+    const tr = await appel("GET", "/trajets/du-jour");
+    if (!tr) return;
+    etat.trajets = tr.status === 200 ? tr.data : null;
+  }
   etat.ecran = "tournee";
   if (r.status !== 200 && r.status !== 404) annoncer("erreur", r.detail);
+  rendre();
+}
+
+async function chargerTrajets() {
+  const r = await appel("GET", "/trajets/du-jour");
+  if (!r) return;
+  if (r.status !== 200) { annoncer("erreur", r.detail); await chargerTournee(); return; }
+  etat.trajets = r.data;
+  if (r.data.tournee_attribuee) {
+    annoncer("info", "Une tournée vous a été attribuée aujourd'hui : elle remplace vos trajets.");
+    await chargerTournee();
+    return;
+  }
+  etat.ecran = "trajets";
   rendre();
 }
 
@@ -154,7 +177,7 @@ async function ouvrirConditions(lecture) {
   rendre();
 }
 
-async function action(methode, chemin, corps, messageOk) {
+async function action(methode, chemin, corps, messageOk, recharger = chargerTournee) {
   if (etat.occupe) return;                     // évite un double clic pendant l'appel
   etat.occupe = true;
   let r;
@@ -166,14 +189,15 @@ async function action(methode, chemin, corps, messageOk) {
   if (!r) return;
   if (r.status >= 400) annoncer("erreur", r.detail);
   else if (messageOk) annoncer("ok", typeof messageOk === "function" ? messageOk(r.data) : messageOk);
-  await chargerTournee();
+  await recharger();
 }
 
 // --------------------------------------------------------------------------- rendu
 function rendre() {
   const app = document.getElementById("app");
   const ecrans = { connexion: ecranConnexion, verification: ecranVerification, enrolement: ecranEnrolement,
-    codes: ecranCodes, conditions: ecranConditions, tournee: ecranTournee, menu: ecranMenu, domicile: ecranDomicile };
+    codes: ecranCodes, conditions: ecranConditions, tournee: ecranTournee, menu: ecranMenu, domicile: ecranDomicile,
+    trajets: ecranTrajets };
   const defile = app.querySelector(".defilement, .page");
   const position = defile ? defile.scrollTop : 0;
   const memeEcran = app.dataset.ecran === etat.ecran;
@@ -382,6 +406,7 @@ function ecranMenu() {
     p.type_livreur === "interne" ? h("button", { type: "button", classe: "btn btn-menu", texte: "Mon adresse de départ et de retour", onclick: ouvrirDomicile }) : null,
     h("button", { type: "button", classe: "btn btn-menu", texte: "Relire les conditions et mes données", onclick: () => ouvrirConditions(true) }),
     h("button", { type: "button", classe: "btn btn-menu", texte: "Actualiser ma tournée", onclick: chargerTournee }),
+    !t ? h("button", { type: "button", classe: "btn btn-menu", texte: "Mes trajets de la journée", onclick: () => { etat.message = null; chargerTrajets(); } }) : null,
     h("button", { type: "button", classe: "btn btn-menu btn-danger", texte: "Se déconnecter", onclick: async () => {
       await api("POST", "/auth/deconnexion");
       deconnexionLocale("Vous êtes déconnecté.");
@@ -457,7 +482,16 @@ function ecranTournee() {
   const corps = h("div", { classe: "defilement" });
   corps.append(boiteMessage(etat.message, () => { etat.message = null; rendre(); }) || "");
   if (!t) {
+    const j = etat.trajets;
+    const nb = j ? j.etapes.length : 0;
+    const restantes = j ? j.etapes.filter((e) => !e.faite_le).length : 0;
     corps.append(boiteMessage({ type: "info", texte: "Aucune tournée ne vous est attribuée aujourd'hui." }),
+      h("div", { classe: "livraison" },
+        h("div", { classe: "nom", texte: "Des déplacements à faire aujourd'hui ?" }),
+        h("div", { classe: "petit", texte: nb
+          ? nb + " étape(s) prévue(s), " + restantes + " restante(s)" + (j.optimisee_le ? " · itinéraire optimisé" : " · pas encore optimisé") + "."
+          : "Garage, contrôle technique, récupération d'une pièce… Saisissez vos adresses et l'application calcule le meilleur ordre de passage en respectant vos rendez-vous." }),
+        h("button", { type: "button", classe: "btn btn-principal", texte: nb ? "Mes trajets de la journée" : "Organiser mes trajets de la journée", onclick: () => { etat.message = null; chargerTrajets(); } })),
       h("button", { type: "button", classe: "btn btn-contour", texte: "Actualiser", onclick: chargerTournee }));
     return h("div", { classe: "ecran" }, entete, corps);
   }
@@ -608,25 +642,39 @@ function formulaireAjout(t) {
 }
 
 // ---------------- carte (sans fond de carte en ligne : rien ne part vers un service tiers)
-function carteGeo(t) {
-  const L = 362, H = 220, marge = 22;
-  const points = [];
-  const depot = [t.depot.latitude, t.depot.longitude];
-  points.push(depot);
-  if (t.domicile) points.push([t.domicile.latitude, t.domicile.longitude]);
-  t.livraisons.forEach((l) => { if (l.client.latitude !== null) points.push([l.client.latitude, l.client.longitude]); });
+const CARTE_L = 362, CARTE_H = 220;
+
+/** Projection simple (latitude, longitude) → pixels qui fait tenir tous les points dans la carte. */
+function projecteur(points, L = CARTE_L, H = CARTE_H, marge = 22) {
   const lats = points.map((p) => p[0]), lons = points.map((p) => p[1]);
   const latMoy = (Math.min(...lats) + Math.max(...lats)) / 2;
   const kx = Math.cos(latMoy * Math.PI / 180);
   const xMin = Math.min(...lons) * kx, xMax = Math.max(...lons) * kx, yMin = Math.min(...lats), yMax = Math.max(...lats);
   const echelle = Math.min((L - 2 * marge) / Math.max(xMax - xMin, 1e-6), (H - 2 * marge) / Math.max(yMax - yMin, 1e-6));
   const dx = (L - (xMax - xMin) * echelle) / 2, dy = (H - (yMax - yMin) * echelle) / 2;
-  const proj = (lat, lon) => [dx + (lon * kx - xMin) * echelle, H - (dy + (lat - yMin) * echelle)];
+  return (lat, lon) => [dx + (lon * kx - xMin) * echelle, H - (dy + (lat - yMin) * echelle)];
+}
 
+function fondCarte(L = CARTE_L, H = CARTE_H) {
   const svg = s("svg", { viewBox: "0 0 " + L + " " + H, preserveAspectRatio: "none", "aria-hidden": "true" });
   [[0, 0.3], [0, 0.7], [1, 0.25], [1, 0.75]].forEach(([vertical, f]) => svg.append(s("line", vertical
     ? { x1: L * f, y1: 0, x2: L * f, y2: H, stroke: "#FFFFFF", "stroke-width": 5 }
     : { x1: 0, y1: H * f, x2: L, y2: H * f, stroke: "#FFFFFF", "stroke-width": 5 })));
+  return svg;
+}
+
+function placer(el, p, L = CARTE_L, H = CARTE_H) {
+  el.style.left = (p[0] / L * 100) + "%"; el.style.top = (p[1] / H * 100) + "%"; return el;
+}
+
+function carteGeo(t) {
+  const points = [];
+  const depot = [t.depot.latitude, t.depot.longitude];
+  points.push(depot);
+  if (t.domicile) points.push([t.domicile.latitude, t.domicile.longitude]);
+  t.livraisons.forEach((l) => { if (l.client.latitude !== null) points.push([l.client.latitude, l.client.longitude]); });
+  const proj = projecteur(points);
+  const svg = fondCarte();
   const pDepot = proj(...depot);
   const trace = [pDepot];
   t.livraisons.filter((l) => l.statut !== "reporte" && l.client.latitude !== null && (l.ordre_passage !== null || !t.optimisee_le))
@@ -640,7 +688,6 @@ function carteGeo(t) {
   svg.append(s("polyline", attributs));
 
   const boite = h("div", { classe: "carte-geo", role: "img", "aria-label": "Carte de la tournée : dépôt, clients numérotés et itinéraire" }, svg);
-  const placer = (el, p) => { el.style.left = (p[0] / L * 100) + "%"; el.style.top = (p[1] / H * 100) + "%"; return el; };
   boite.append(placer(h("div", { classe: "repere", style: { background: "#16213A" }, texte: "D" }), pDepot));
   if (pDomicile) boite.append(placer(h("div", { classe: "repere", style: { background: "#15803D" } }, icone(["M3 11l9-7 9 7", "M5 10v10h14V10"], "#FFFFFF", 16)), pDomicile));
   t.livraisons.forEach((l, k) => {
@@ -732,6 +779,234 @@ function blocRemarques(l, remarques) {
       action("POST", "/livraisons/" + l.id + "/remarques", { texte: saisie.value }, "Remarque enregistrée : elle s'affichera aux prochaines livraisons à cette adresse.");
     } }));
   return zone;
+}
+
+// ---------------- journée de trajets (jours sans tournée : garage, contrôle technique, pièce à récupérer…)
+function hhmm(t) { return t ? t.slice(0, 5) : ""; }
+function ajouterMinutes(debut, minutes) {
+  const [hh, mm] = debut.split(":").map(Number);
+  const total = hh * 60 + mm + minutes;
+  return String(Math.floor(total / 60) % 24).padStart(2, "0") + ":" + String(total % 60).padStart(2, "0");
+}
+function cleDuPoint(p) { return p.nom === "Domicile" ? "domicile" : "depot"; }
+
+function ecranTrajets() {
+  const j = etat.trajets;
+  const entete = h("div", { classe: "entete" },
+    h("button", { type: "button", classe: "btn-icone", "aria-label": "Retour à l'accueil", onclick: chargerTournee },
+      icone(["M15 5l-7 7 7 7"])),
+    h("div", { style: { flex: "1" } },
+      h("div", { classe: "titre", texte: "Mes trajets du jour" }),
+      h("div", { classe: "sous-titre", texte: new Date(j.date_journee + "T12:00:00").toLocaleDateString("fr-FR") + " · journée sans tournée" })),
+    h("button", { type: "button", classe: "btn-icone", "aria-label": "Ouvrir le menu", onclick: () => { etat.ecran = "menu"; rendre(); } },
+      icone(["M4 7h16", "M4 12h16", "M4 17h16"])));
+
+  const corps = h("div", { classe: "defilement" });
+  corps.append(boiteMessage(etat.message, () => { etat.message = null; rendre(); }) || "");
+  const etapes = j.etapes;
+  const aFaire = etapes.filter((e) => !e.faite_le);
+  const faites = etapes.filter((e) => e.faite_le);
+  const numero = (e) => etapes.indexOf(e) + 1;
+
+  corps.append(blocReglages(j));
+
+  const indicateur = (libelle, valeur) => h("div", { classe: "indicateur" }, h("div", { classe: "libelle", texte: libelle }), h("div", { classe: "valeur", texte: valeur }));
+  const optimise = !!j.optimisee_le;
+  corps.append(h("div", { classe: "indicateurs" },
+    indicateur("Étapes faites", faites.length + " / " + etapes.length),
+    indicateur("Distance", optimise && j.distance_km !== null ? nombre(j.distance_km) + " km" : "—"),
+    indicateur("Retour " + (cleDuPoint(j.point_arrivee) === "domicile" ? "domicile" : "dépôt"),
+      optimise && j.duree_min !== null ? ajouterMinutes(hhmm(j.heure_depart), j.duree_min) : "—")));
+
+  if (aFaire.length) {
+    corps.append(h("button", { type: "button", classe: "btn btn-principal", disabled: etat.calcul,
+      texte: etat.calcul ? "Calcul de l'itinéraire…" : (faites.length ? "Recalculer l'itinéraire restant" : "Optimiser mon itinéraire"),
+      onclick: optimiserTrajets }));
+    if (!optimise) corps.append(h("p", { classe: "petit", texte: "Étapes dans l'ordre de saisie : appuyez sur le bouton ci-dessus pour obtenir le meilleur ordre et les heures de passage, en respectant vos rendez-vous." }));
+  } else if (etapes.length) {
+    corps.append(boiteMessage({ type: "ok", texte: "Toutes vos étapes sont faites. Bonne fin de journée !" }));
+  }
+
+  corps.append(formulaireEtape(j));
+
+  if (etapes.length) {
+    corps.append(carteTrajets(j), h("p", { classe: "tres-petit", style: { marginTop: "-6px" },
+      texte: "D : dépôt. " + (optimise ? "Trait bleu : itinéraire optimisé." : "Pointillés gris : ordre de saisie.") + " Tracé à vol d'oiseau." }));
+  }
+  const prochaine = aFaire[0];
+  if (aFaire.length) corps.append(h("h2", { classe: "section", texte: "À faire (" + aFaire.length + ")" }));
+  aFaire.forEach((e) => corps.append(carteEtape(e, numero(e), prochaine && e.id === prochaine.id)));
+  if (faites.length) corps.append(h("h2", { classe: "section", texte: "Faites (" + faites.length + ")" }));
+  faites.forEach((e) => corps.append(carteEtape(e, numero(e), false)));
+  corps.append(h("p", { classe: "tres-petit", texte: "Vos étapes sont visibles par le planificateur, en consultation seulement. L'adresse de votre domicile ne lui est jamais montrée." }));
+  return h("div", { classe: "ecran" }, entete, corps);
+}
+
+function blocReglages(j) {
+  const options = ["depot"].concat(j.domicile_disponible ? ["domicile"] : []);
+  const ligne = (cle, libelle, actuel) => h("div", { classe: "reglage" },
+    h("span", { classe: "petit", texte: libelle }),
+    h("div", { classe: "rangee" }, options.map((o) => h("button", { type: "button", classe: "choix" + (actuel === o ? " actif" : ""),
+      "aria-pressed": String(actuel === o), texte: POINTS[o], onclick: () => { if (actuel !== o) reglerTrajets({ [cle]: o }); } }))));
+  const champHeure = h("input", { type: "time", id: "tr-heure", value: hhmm(j.heure_depart), step: 300 });
+  champHeure.addEventListener("change", () => { if (champHeure.value) reglerTrajets({ heure_depart: champHeure.value }); });
+  const bloc = h("div", { classe: "livraison" }, h("div", { classe: "nom", texte: "Départ et retour" }));
+  if (j.domicile_disponible) bloc.append(ligne("depart", "Je pars de", cleDuPoint(j.point_depart)), ligne("retour", "Je termine à", cleDuPoint(j.point_arrivee)));
+  else bloc.append(h("div", { classe: "petit", texte: "Départ du dépôt et retour au dépôt." }));
+  bloc.append(h("label", { classe: "champ", for: "tr-heure" }, "Heure de départ", champHeure));
+  if (!j.domicile_disponible && etat.profil && etat.profil.type_livreur === "interne") {
+    bloc.append(h("div", { classe: "petit" }, "Pour partir de chez vous ou y terminer : ",
+      h("button", { type: "button", classe: "btn-lien", style: { display: "inline", minHeight: "0", fontSize: "12.5px" }, texte: "renseignez votre adresse", onclick: ouvrirDomicile }), "."));
+  }
+  return bloc;
+}
+
+async function reglerTrajets(modif) {
+  const j = etat.trajets;
+  const corps = Object.assign({ depart: cleDuPoint(j.point_depart), retour: cleDuPoint(j.point_arrivee), heure_depart: hhmm(j.heure_depart) }, modif);
+  const message = j.optimisee_le && j.etapes.some((e) => !e.faite_le) ? "Réglage enregistré : appuyez sur « Optimiser » pour recalculer l'itinéraire." : null;
+  await action("PUT", "/trajets/du-jour/reglages", corps, message, chargerTrajets);
+}
+
+function formulaireEtape(j) {
+  const nb = j.etapes.length;
+  const details = h("details", { classe: "bloc", open: nb === 0 }, h("summary", { texte: "Ajouter une étape (" + nb + " / " + j.max_etapes + ")" }));
+  const contenu = h("div", { classe: "contenu" });
+  details.append(contenu);
+  if (nb >= j.max_etapes) {
+    contenu.append(boiteMessage({ type: "alerte", texte: "Nombre maximal d'étapes atteint pour la journée." }));
+    return details;
+  }
+  const champs = {
+    libelle: h("input", { type: "text", id: "tr-libelle", maxlength: 80, placeholder: "Ex. : Contrôle technique" }),
+    voie: h("input", { type: "text", id: "tr-voie", maxlength: 200 }),
+    cp: h("input", { type: "text", id: "tr-cp", maxlength: 5, inputmode: "numeric" }),
+    ville: h("input", { type: "text", id: "tr-ville", maxlength: 100 }),
+    debut: h("input", { type: "time", id: "tr-debut", step: 300 }),
+    fin: h("input", { type: "time", id: "tr-fin", step: 300 }),
+    duree: h("input", { type: "number", id: "tr-duree", min: 1, max: 480, inputmode: "numeric", value: j.duree_defaut_min }),
+  };
+  const idees = h("div", { classe: "puces" }, IDEES_ETAPES.map((x) => h("button", { type: "button", classe: "puce", texte: x,
+    onclick: () => { champs.libelle.value = x; champs.voie.focus(); } })));
+  const zoneRdv = h("div", { classe: "grille-2", hidden: true },
+    h("label", { classe: "champ", for: "tr-debut" }, "De", champs.debut),
+    h("label", { classe: "champ", for: "tr-fin" }, "À", champs.fin));
+  const caseRdv = h("input", { type: "checkbox", id: "tr-rdv" });
+  caseRdv.addEventListener("change", () => { zoneRdv.hidden = !caseRdv.checked; });
+  const retour = h("div");
+  const erreur = (texte) => retour.replaceChildren(boiteMessage({ type: "erreur", texte }));
+  const ajouter = h("button", { type: "button", classe: "btn btn-principal", texte: "Ajouter l'étape", onclick: async () => {
+    const v = (k) => champs[k].value.trim();
+    if (v("libelle").length < 2 || !v("voie") || !/^[0-9]{5}$/.test(v("cp")) || !v("ville")) {
+      erreur("Nom de l'étape, rue, code postal (5 chiffres) et ville sont obligatoires."); return;
+    }
+    const rdv = caseRdv.checked;
+    if (rdv && (!v("debut") || !v("fin") || v("fin") <= v("debut"))) {
+      erreur("Indiquez l'heure de début et de fin du rendez-vous (la fin après le début)."); return;
+    }
+    const duree = Number(v("duree") || j.duree_defaut_min);
+    if (!Number.isInteger(duree) || duree < 1 || duree > 480) { erreur("La durée sur place doit être comprise entre 1 et 480 minutes."); return; }
+    retour.replaceChildren(boiteMessage({ type: "info", texte: "Vérification de l'adresse…" }));
+    const r = await appel("POST", "/trajets/du-jour/etapes", { libelle: v("libelle"), voie: v("voie"), code_postal: v("cp"), ville: v("ville"),
+      rdv_debut: rdv ? v("debut") : null, rdv_fin: rdv ? v("fin") : null, duree_min: duree });
+    if (!r) return;
+    if (r.status !== 201) { erreur(r.detail); return; }
+    annoncer(r.data.avertissement ? "alerte" : "ok", "« " + r.data.etape.libelle + " » ajouté. Appuyez sur « Optimiser » pour calculer le meilleur ordre de passage." + (r.data.avertissement ? " " + r.data.avertissement : ""));
+    await chargerTrajets();
+  } });
+  contenu.append(
+    h("label", { classe: "champ", for: "tr-libelle" }, "Étape", champs.libelle),
+    idees,
+    h("label", { classe: "champ", for: "tr-voie" }, "Numéro et rue", champs.voie),
+    h("div", { classe: "grille-cp" }, h("label", { classe: "champ", for: "tr-cp" }, "Code postal", champs.cp), h("label", { classe: "champ", for: "tr-ville" }, "Ville", champs.ville)),
+    h("label", { classe: "case", for: "tr-rdv" }, caseRdv, "Rendez-vous à heure fixe"),
+    zoneRdv,
+    h("label", { classe: "champ", for: "tr-duree" }, "Temps sur place (minutes)", champs.duree),
+    retour, ajouter);
+  return details;
+}
+
+function carteTrajets(j) {
+  const dep = [j.point_depart.latitude, j.point_depart.longitude];
+  const arr = [j.point_arrivee.latitude, j.point_arrivee.longitude];
+  const proj = projecteur([dep, arr].concat(j.etapes.map((e) => [e.latitude, e.longitude])));
+  const svg = fondCarte();
+  const pDep = proj(...dep), pArr = proj(...arr);
+  const trace = [pDep].concat(j.etapes.map((e) => proj(e.latitude, e.longitude)), [pArr]);
+  const attributs = { points: trace.map((p) => p.map((v) => v.toFixed(1)).join(",")).join(" "), fill: "none", "stroke-width": 3,
+    "stroke-linejoin": "round", stroke: j.optimisee_le ? "#1F4E79" : "#6B7280" };
+  if (!j.optimisee_le) attributs["stroke-dasharray"] = "6 8";
+  svg.append(s("polyline", attributs));
+  const boite = h("div", { classe: "carte-geo", role: "img", "aria-label": "Carte des trajets : point de départ, étapes numérotées et itinéraire" }, svg);
+  const repere = (pt) => pt.nom === "Domicile"
+    ? h("div", { classe: "repere", style: { background: "#15803D" } }, icone(["M3 11l9-7 9 7", "M5 10v10h14V10"], "#FFFFFF", 16))
+    : h("div", { classe: "repere", style: { background: "#16213A" }, texte: "D" });
+  boite.append(placer(repere(j.point_depart), pDep));
+  if (j.point_arrivee.nom !== j.point_depart.nom) boite.append(placer(repere(j.point_arrivee), pArr));
+  j.etapes.forEach((e, k) => boite.append(placer(h("div", { classe: "epingle",
+    style: { background: e.faite_le ? "#15803D" : "#1F4E79" }, texte: String(k + 1) }), proj(e.latitude, e.longitude))));
+  return boite;
+}
+
+function carteEtape(e, numero, prochaine) {
+  const faite = !!e.faite_le;
+  const infos = [];
+  if (e.rdv_debut) infos.push("RDV " + hhmm(e.rdv_debut) + "–" + hhmm(e.rdv_fin));
+  infos.push(e.duree_min + " min sur place");
+  if (e.heure_prevue && !faite) infos.push("arrivée prévue " + heure(e.heure_prevue));
+  const carte = h("article", { classe: "livraison", "aria-label": e.libelle },
+    h("div", { classe: "ligne-titre" },
+      h("div", { classe: "nom", texte: numero + ". " + e.libelle }),
+      h("div", { classe: "statut", style: { color: faite ? "#15803D" : "#1F4E79" }, texte: faite ? "● Faite" : "● À faire" })),
+    h("div", { classe: "adresse", texte: e.adresse }),
+    h("div", { classe: "petit", texte: infos.join(" · ") }));
+  if (!faite && e.rdv_fin && e.heure_prevue && heure(e.heure_prevue) > hhmm(e.rdv_fin)) {
+    carte.append(h("div", { classe: "itineraire alerte", texte: "Rendez-vous risqué : arrivée prévue après " + hhmm(e.rdv_fin) + "." }));
+  }
+  if (e.position_approximative) carte.append(h("div", { classe: "tres-petit", texte: "Adresse localisée au centre de la commune : heure approximative." }));
+
+  if (faite) {
+    carte.append(h("div", { classe: "petit", texte: "Faite à " + heure(e.faite_le) }),
+      h("button", { type: "button", classe: "btn-lien", texte: "Annuler (cliqué par erreur)",
+        onclick: () => action("POST", "/trajets/etapes/" + e.id + "/a-faire", undefined, "« " + e.libelle + " » est de nouveau à faire.", chargerTrajets) }));
+  } else if (etat.aSupprimer === e.id) {
+    carte.append(h("div", { classe: "petit", texte: "Supprimer cette étape ?" }),
+      h("div", { classe: "duo" },
+        h("button", { type: "button", classe: "btn btn-danger", texte: "Oui, supprimer", onclick: () => {
+          etat.aSupprimer = null;
+          action("DELETE", "/trajets/etapes/" + e.id, undefined, "Étape supprimée.", chargerTrajets);
+        } }),
+        h("button", { type: "button", classe: "btn", texte: "Garder", onclick: () => { etat.aSupprimer = null; rendre(); } })));
+  } else {
+    carte.append(h("div", { classe: "duo" },
+      h("button", { type: "button", classe: "btn " + (prochaine ? "btn-principal" : "btn-contour"), texte: "Étape faite",
+        onclick: () => action("POST", "/trajets/etapes/" + e.id + "/faite", undefined, "« " + e.libelle + " » : faite.", chargerTrajets) }),
+      h("button", { type: "button", classe: "btn", texte: "Supprimer", onclick: () => { etat.aSupprimer = e.id; rendre(); } })));
+  }
+  return carte;
+}
+
+async function optimiserTrajets() {
+  if (etat.occupe) return;
+  etat.occupe = true;
+  etat.calcul = true;
+  rendre();
+  try {
+    const r = await appel("POST", "/trajets/du-jour/optimiser");
+    if (!r) return;
+    if (r.status !== 200) { annoncer("erreur", r.detail); }
+    else {
+      const res = r.data;
+      let texte = (res.mode === "restant" ? "Itinéraire restant recalculé depuis votre dernière étape" : "Itinéraire optimisé")
+        + " en " + nombre(res.duree_calcul_s) + " s : " + nombre(res.distance_apres_km) + " km au lieu de " + nombre(res.distance_avant_km) + " km dans l'ordre de saisie.";
+      if (res.nb_retards) texte += " Attention : " + res.nb_retards + " rendez-vous risque(nt) d'être manqué(s).";
+      annoncer(res.nb_retards ? "alerte" : "ok", texte);
+    }
+  } finally {
+    etat.occupe = false;
+    etat.calcul = false;
+  }
+  await chargerTrajets();
 }
 
 // --------------------------------------------------------------------------- démarrage
