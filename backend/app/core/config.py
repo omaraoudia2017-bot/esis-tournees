@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     modele_anomalies: str = "/app/modeles/anomalies.joblib"
     utiliser_detection_anomalies: bool = True
 
+    # Conditions d'utilisation + information RGPD (fichier app/documents/conditions_utilisation_v<version>.md).
+    # Changer la version oblige chaque livreur à relire et accepter le nouveau texte.
+    conditions_version: str = "1.0"
+
     # Écran du livreur : annulation d'un clic Démarrer / Terminer fait par erreur
     delai_annulation_pointage_min: int = 10
     # Remarques sur une adresse : nombre de remarques récentes affichées au livreur

@@ -5,7 +5,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from app.api import routes_admin, routes_auth, routes_tournees
+from app.api import routes_admin, routes_auth, routes_conditions, routes_tournees
 from app.core.config import get_settings
 from app.db.session import get_db
 
@@ -36,13 +36,14 @@ async def entetes_securite(request: Request, call_next):
     reponse.headers["X-Content-Type-Options"] = "nosniff"
     reponse.headers["X-Frame-Options"] = "DENY"
     reponse.headers["Referrer-Policy"] = "no-referrer"
-    if request.url.path.startswith(("/auth", "/tournees", "/livraisons", "/admin")):
+    if request.url.path.startswith(("/auth", "/tournees", "/livraisons", "/remarques", "/conditions", "/admin")):
         # jamais de jeton ni de donnée client (digicode, téléphone) dans un cache
         reponse.headers["Cache-Control"] = "no-store"
     return reponse
 
 
 app.include_router(routes_auth.router)
+app.include_router(routes_conditions.router)
 app.include_router(routes_admin.router)
 app.include_router(routes_tournees.router)
 

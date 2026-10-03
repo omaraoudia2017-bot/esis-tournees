@@ -10,6 +10,7 @@ from app.models import Utilisateur
 from app.schemas.auth import (DemandeCode, DemandeConnexion, ProfilUtilisateur, ReponseActivation,
                               ReponseEnrolement, ReponseEtape1, ReponseJeton)
 from app.services import auth as service
+from app.services.conditions import doit_accepter
 from app.services.journal import ContexteRequete
 
 router = APIRouter(prefix="/auth", tags=["Authentification"])
@@ -80,4 +81,7 @@ def deconnexion(u: Utilisateur = Depends(utilisateur_courant), charge: dict = De
 def moi(u: Utilisateur = Depends(utilisateur_courant)):
     return ProfilUtilisateur(id=u.id, identifiant=u.identifiant, nom=u.nom, prenom=u.prenom,
                              role=u.role.value, totp_active=u.totp_active,
-                             derniere_connexion=u.derniere_connexion)
+                             derniere_connexion=u.derniere_connexion,
+                             conditions_a_accepter=doit_accepter(u, get_settings()),
+                             conditions_version=u.conditions_version,
+                             conditions_acceptees_le=u.conditions_acceptees_le)

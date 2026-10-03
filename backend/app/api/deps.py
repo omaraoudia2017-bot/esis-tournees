@@ -13,6 +13,7 @@ from app.db.session import get_db
 from app.models import JetonRevoque, Utilisateur
 from app.models.enums import RoleUtilisateur
 from app.services.auth import ErreurAuth, utilisateur_preauth
+from app.services.conditions import MESSAGE_A_ACCEPTER, doit_accepter
 from app.services.journal import ContexteRequete, contexte_depuis, journaliser
 
 _bearer = HTTPBearer(auto_error=False)
@@ -82,7 +83,8 @@ def utilisateur_courant(charge: dict = Depends(charge_acces),
 
 
 def exiger_role(*roles: RoleUtilisateur) -> Callable:
-    """Contrôle d'accès par rôle, vérifié côté serveur à chaque requête (RBAC)."""
+    """Contrôle d'accès par rôle, vérifié côté serveur à chaque requête (RBAC).
+    Un livreur doit aussi avoir accepté la version en vigueur des conditions d'utilisation."""
     def verification(request: Request, u: Utilisateur = Depends(utilisateur_courant),
                      db: Session = Depends(get_db)) -> Utilisateur:
         if u.role not in roles:
@@ -90,5 +92,8 @@ def exiger_role(*roles: RoleUtilisateur) -> Callable:
                         route=request.url.path, role=u.role.value)
             db.commit()
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Accès refusé.")
+        # Livreur : conditions d'utilisation et information RGPD acceptées (version en vigueur)
+        if doit_accepter(u, get_settings()):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, MESSAGE_A_ACCEPTER)
         return u
     return verification

@@ -22,6 +22,8 @@ class CompteVue(BaseModel):
     vehicule: str | None
     type_camion: str | None
     derniere_connexion: datetime | None
+    conditions_version: str | None = None
+    conditions_acceptees_le: datetime | None = None
 
 
 class DemandeCompte(BaseModel):

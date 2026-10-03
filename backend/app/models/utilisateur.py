@@ -35,6 +35,11 @@ class Utilisateur(Base):
     # Jetons émis avant cette date refusés (désactivation, réinitialisation du mot de passe ou 2FA)
     sessions_invalidees_le: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Conditions d'utilisation et information RGPD : version lue et acceptée, et quand.
+    # Une nouvelle version (CONDITIONS_VERSION) oblige le livreur à les relire et à les accepter.
+    conditions_version: Mapped[str | None] = mapped_column(String(10))
+    conditions_acceptees_le: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     vehicule_id: Mapped[int | None] = mapped_column(ForeignKey("vehicules.id", ondelete="SET NULL"))
     actif: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     derniere_connexion: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

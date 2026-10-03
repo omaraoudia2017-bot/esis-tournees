@@ -49,7 +49,9 @@ def _compte(u: Utilisateur, v: Vehicule | None) -> CompteVue:
                      verrouille=bool(u.verrouille_jusqua and u.verrouille_jusqua > datetime.now(timezone.utc)),
                      vehicule_id=v.id if v else None, vehicule=v.immatriculation if v else None,
                      type_camion=v.type_camion.value if v else None,
-                     derniere_connexion=u.derniere_connexion)
+                     derniere_connexion=u.derniere_connexion,
+                     conditions_version=u.conditions_version,
+                     conditions_acceptees_le=u.conditions_acceptees_le)
 
 
 def _compte_de(db: Session, u: Utilisateur) -> CompteVue:

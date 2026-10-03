@@ -22,7 +22,8 @@ EVENEMENTS = ["(tous)", "CONNEXION_ANORMALE", "CONNEXION_ECHEC", "CONNEXION_REUS
               "ACCES_REFUSE", "IMPORT_CSV", "ADMIN_CREATION_COMPTE", "ADMIN_DESACTIVER",
               "ADMIN_REINITIALISER_MDP", "ADMIN_REINITIALISER_2FA", "ADMIN_ATTRIBUTION_TOURNEE",
               "ADMIN_CORRECTION_CLIENT", "RGPD_EXPORT", "RGPD_ANONYMISATION", "AJOUT_CLIENT_VOLEE",
-              "CONSULTATION_TOURNEE", "POINTAGE_ANNULE", "REMARQUE_AJOUTEE", "REMARQUE_SUPPRIMEE"]
+              "CONSULTATION_TOURNEE", "POINTAGE_ANNULE", "REMARQUE_AJOUTEE", "REMARQUE_SUPPRIMEE",
+              "CONDITIONS_ACCEPTEES"]
 
 outils = None          # fourni par app.py : appel_api, reinitialiser, carte_tournee, heure_locale
 
@@ -276,8 +277,9 @@ def onglet_livreurs() -> None:
     if secret := st.session_state.pop("mdp_a_transmettre", None):
         identifiant, mdp = secret
         st.warning(f"Mot de passe temporaire de **{identifiant}**, affiché une seule fois : à transmettre "
-                   "au salarié par un canal sûr (en main propre, pas par e-mail). La double "
-                   "authentification lui sera demandée à la première connexion.")
+                   "au salarié par un canal sûr (en main propre, pas par e-mail). À la première "
+                   "connexion, il activera la double authentification puis devra lire et accepter les "
+                   "conditions d'utilisation et l'information sur ses données personnelles.")
         st.code(mdp, language=None)
     comptes = api("GET", "/admin/utilisateurs") or []
     vehicules = api("GET", "/admin/vehicules") or []
@@ -285,7 +287,10 @@ def onglet_livreurs() -> None:
         "Identifiant": c["identifiant"], "Nom": f"{c['prenom']} {c['nom']}", "Rôle": c["role"],
         "Actif": c["actif"], "2FA": c["totp_active"], "Verrouillé": c["verrouille"],
         "Camion": f"{c['vehicule']} ({c['type_camion']})" if c["vehicule"] else "—",
-        "Dernière connexion": date_heure(c["derniere_connexion"])} for c in comptes]),
+        "Dernière connexion": date_heure(c["derniere_connexion"]),
+        "Conditions": (f"v{c['conditions_version']} le {date_fr(c['conditions_acceptees_le'])}"
+                       if c["conditions_acceptees_le"] else "non acceptées" if c["role"] == "livreur" else "—")}
+        for c in comptes]),
         hide_index=True, width="stretch")
 
     col1, col2 = st.columns(2)

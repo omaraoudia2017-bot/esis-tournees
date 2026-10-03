@@ -47,6 +47,11 @@ class ProfilUtilisateur(BaseModel):
     role: str
     totp_active: bool
     derniere_connexion: datetime | None
+    # Livreur : tant que la version en vigueur des conditions n'est pas acceptée, seules les routes
+    # /auth et /conditions répondent (les autres renvoient 403)
+    conditions_a_accepter: bool = False
+    conditions_version: str | None = None
+    conditions_acceptees_le: datetime | None = None
 
 
 class EvenementJournal(BaseModel):
@@ -59,3 +64,19 @@ class EvenementJournal(BaseModel):
     identifiant_saisi: str | None
     adresse_ip: str | None
     details: dict | None
+
+
+class ConditionsVue(BaseModel):
+    version: str                       # version en vigueur
+    texte: str                         # Markdown
+    a_accepter: bool
+    version_acceptee: str | None
+    acceptee_le: datetime | None
+
+
+class DemandeAcceptation(BaseModel):
+    """Deux cases distinctes : accepter les règles d'usage, et attester avoir lu l'information
+    RGPD (on ne « consent » pas à un traitement fondé sur le contrat ou l'intérêt légitime)."""
+    version: str = Field(max_length=10)
+    conditions_acceptees: Literal[True]
+    information_lue: Literal[True]

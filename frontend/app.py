@@ -208,16 +208,77 @@ def ecran_connecte() -> None:
         restant = int((st.session_state.expire_le - datetime.now(timezone.utc)).total_seconds() // 60)
         st.caption(f"Session valable encore {restant} min")
         if st.button("Se déconnecter", width="stretch"):
-            appel_api("POST", "/auth/deconnexion", st.session_state.jeton)
-            reinitialiser("Vous êtes déconnecté.")
-            st.rerun()
+            deconnecter("Vous êtes déconnecté.")
+        if profil["role"] == "livreur" and profil.get("conditions_acceptees_le"):
+            st.caption(f"Conditions d'utilisation v{profil['conditions_version']} acceptées le "
+                       f"{datetime.fromisoformat(profil['conditions_acceptees_le']).astimezone(FUSEAU):%d/%m/%Y}")
+            if st.button("Relire les conditions et mes données", width="stretch"):
+                st.session_state.relire_conditions = True
 
+    if profil["role"] == "livreur" and profil.get("conditions_a_accepter"):
+        ecran_conditions()
+        return
+    if st.session_state.get("relire_conditions"):
+        ecran_conditions(lecture_seule=True)
+        return
     if profil["role"] == "admin":
         espace_admin.ecran_admin(profil, SimpleNamespace(
             appel_api=appel_api, reinitialiser=reinitialiser, carte_tournee=carte_tournee,
             heure_locale=heure_locale, fuseau=FUSEAU))
     else:
         ecran_tournee(profil)
+
+
+def deconnecter(message: str) -> None:
+    appel_api("POST", "/auth/deconnexion", st.session_state.jeton)
+    reinitialiser(message)
+    st.session_state.pop("relire_conditions", None)
+    st.rerun()
+
+
+def ecran_conditions(lecture_seule: bool = False) -> None:
+    """Conditions d'utilisation + information RGPD. À la première connexion (et à chaque nouvelle
+    version), le livreur doit les accepter : tant que ce n'est pas fait, l'API refuse l'accès
+    à sa tournée (le contrôle est côté serveur, pas seulement dans cet écran)."""
+    r = appel_api("GET", "/conditions", st.session_state.jeton)
+    if r is None:
+        return
+    if r.status_code != 200:
+        afficher_erreur(r)
+        return
+    c = r.json()
+    st.title("Conditions d'utilisation et données personnelles")
+    if c["a_accepter"] and c["version_acceptee"]:
+        st.info("Les conditions d'utilisation ont été mises à jour : merci de lire la nouvelle version.")
+    elif c["a_accepter"]:
+        st.info("Bienvenue ! Avant d'accéder à votre tournée, prenez quelques minutes pour lire ces "
+                "conditions et l'information sur l'utilisation de vos données.")
+    st.caption(f"Version {c['version']}")
+    with st.container(height=430, border=True):
+        st.markdown(c["texte"])
+
+    if lecture_seule or not c["a_accepter"]:
+        if st.button("Retour à ma tournée", type="primary", width="stretch"):
+            st.session_state.pop("relire_conditions", None)
+            st.rerun()
+        return
+
+    conditions = st.checkbox("J'ai lu et j'accepte les conditions d'utilisation (articles 1 à 4).")
+    information = st.checkbox("J'ai pris connaissance de l'information sur le traitement de mes "
+                              "données personnelles (article 5).")
+    col1, col2 = st.columns(2)
+    if col1.button("Accepter et continuer", type="primary", width="stretch",
+                   disabled=not (conditions and information)):
+        r = appel_api("POST", "/conditions/accepter", st.session_state.jeton,
+                      json={"version": c["version"], "conditions_acceptees": True, "information_lue": True})
+        if r is not None and r.status_code == 200:
+            st.session_state.message_tournee = ("success", "Merci, vous pouvez accéder à votre tournée.")
+            st.rerun()
+        elif r is not None:
+            afficher_erreur(r)
+    if col2.button("Refuser et me déconnecter", width="stretch"):
+        deconnecter("Les conditions d'utilisation doivent être acceptées pour utiliser l'application. "
+                    "Pour toute question, adressez-vous à votre responsable.")
 
 
 # --------------------------------------------------------------------------- module 2 : tournée

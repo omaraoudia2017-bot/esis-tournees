@@ -69,6 +69,8 @@ MIGRATIONS = [
     "ALTER TABLE tournees ADD COLUMN IF NOT EXISTS heure_fin TIME",                # Jour 7
     "ALTER TABLE utilisateurs ADD COLUMN IF NOT EXISTS sessions_invalidees_le TIMESTAMPTZ",  # Jour 12
     "ALTER TYPE precision_geocodage ADD VALUE IF NOT EXISTS 'manuelle'",           # Jour 12
+    "ALTER TABLE utilisateurs ADD COLUMN IF NOT EXISTS conditions_version VARCHAR(10)",          # CGU
+    "ALTER TABLE utilisateurs ADD COLUMN IF NOT EXISTS conditions_acceptees_le TIMESTAMPTZ",     # CGU
 ]
 
 # Une instruction SQL par élément (exécutées une à une)
