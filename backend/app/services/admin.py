@@ -270,8 +270,9 @@ def creer_tournee(db: Session, acteur: Acteur, reglages: Settings, livreur_id: i
     zone = db.get(Zone, zone_id) if zone_id else None
     limite = zone.max_clients if zone else 15
     if len(ids) > limite:
-        raise ErreurAdmin(409, f"{len(ids)} clients pour une limite de {limite} "
-                          f"(zone {zone.nom if zone else 'non définie'}) : répartissez-les sur une autre tournée.")
+        raise ErreurAdmin(409, f"Tournée non attribuée : {len(ids)} clients pour une limite de {limite} "
+                          f"(zone {zone.nom if zone else 'non définie'}). Retirez {len(ids) - limite} client(s) "
+                          f"de la liste : ils pourront être attribués à un autre livreur ou un autre jour.")
 
     if existante is not None:
         db.delete(existante)                     # livraisons supprimées en cascade

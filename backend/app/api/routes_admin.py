@@ -186,6 +186,7 @@ def lister_tournees(jour: date | None = Query(None, alias="date"), db: Session =
         nb_terminees=faites or 0, nb_a_reporter=reportes or 0, heure_depart=t.heure_depart,
         heure_fin=t.heure_fin, optimisee=t.optimisee_le is not None,
         distance_totale_km=float(t.distance_totale_km) if t.distance_totale_km is not None else None,
+        attribuee_le=t.cree_le,
     ) for t, u, v, z, nb, faites, reportes in service.lister_tournees(db, jour)]
 
 

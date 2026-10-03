@@ -118,6 +118,7 @@ class TourneeResume(BaseModel):
     heure_fin: time | None
     optimisee: bool
     distance_totale_km: float | None
+    attribuee_le: datetime | None = None       # date et heure à laquelle le planificateur l'a créée
 
 
 class DemandeTournee(BaseModel):

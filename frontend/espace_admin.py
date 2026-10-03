@@ -135,10 +135,14 @@ def onglet_tableau_de_bord() -> None:
 
 # --------------------------------------------------------------------------- tournées du jour
 def onglet_tournees() -> None:
-    jour = st.date_input("Jour", value=date.today(), format="DD/MM/YYYY", key="tournees_jour")
+    # Après une attribution : la liste s'ouvre sur le jour de la tournée créée
+    if jour_cree := st.session_state.pop("jour_a_afficher", None):
+        st.session_state.tournees_jour = jour_cree
+    jour = st.date_input("Jour affiché", value=date.today(), format="DD/MM/YYYY", key="tournees_jour")
     tournees = api("GET", "/admin/tournees", params={"date": jour.isoformat()})
     if tournees is None:
         return
+    st.subheader(f"Tournées du {jour:%d/%m/%Y} ({len(tournees)})")
     if tournees:
         st.dataframe(pd.DataFrame([{
             "Livreur": t["livreur_nom"], "Camion": f"{t['vehicule']} ({t['type_camion']})",
@@ -146,14 +150,15 @@ def onglet_tournees() -> None:
             "Statut": STATUTS_TOURNEE.get(t["statut"], t["statut"]),
             "Clients": f"{t['nb_clients']} / {t['max_clients']}", "Pointés": t["nb_terminees"],
             "À reporter": t["nb_a_reporter"], "Optimisée": "oui" if t["optimisee"] else "non",
-            "km": nombre_fr(t["distance_totale_km"]) if t["distance_totale_km"] is not None else "—"}
+            "km": nombre_fr(t["distance_totale_km"]) if t["distance_totale_km"] is not None else "—",
+            "Attribuée le": date_heure(t.get("attribuee_le"))}
             for t in tournees]), hide_index=True, width="stretch")
         choix = st.selectbox("Suivre une tournée", tournees, index=None, placeholder="Choisir un livreur",
                              format_func=lambda t: f"{t['livreur_nom']} — {t['nb_clients']} clients")
         if choix:
             suivi_tournee(choix)
     else:
-        st.info("Aucune tournée ce jour-là.")
+        st.info(f"Aucune tournée le {jour:%d/%m/%Y}.")
     journees_de_trajets(jour)
     st.divider()
     formulaire_tournee(jour)
@@ -220,8 +225,11 @@ def formulaire_tournee(jour: date) -> None:
         livreur = st.selectbox("Livreur", livreurs, format_func=lambda c: (
             f"{c['prenom']} {c['nom']} — " + (f"{c['vehicule']} ({c['type_camion']})" if c["vehicule"]
                                               else "sans camion")))
-        periode = st.selectbox("Période", list(PERIODES))
-        texte = st.text_area("Identifiants des clients (un par ligne, 20 au maximum)",
+        col_date, col_periode = st.columns(2)
+        date_tournee = col_date.date_input("Date de la tournée", value=max(jour, date.today()), min_value=date.today(),
+                                           format="DD/MM/YYYY", help="Jour où le livreur effectuera la tournée.")
+        periode = col_periode.selectbox("Période", list(PERIODES))
+        texte = st.text_area("Identifiants des clients (un par ligne ; limite de la zone : 10 à 20)",
                              value="\n".join(ids_import[:20]), height=150,
                              help="Pré-rempli avec les clients du dernier import. Un client de l'onglet "
                                   "Clients peut aussi être ajouté par son identifiant.")
@@ -233,10 +241,12 @@ def formulaire_tournee(jour: date) -> None:
             st.error("Indiquez au moins un client.")
             return
         t = api("POST", "/admin/tournees", attendu=(201,), timeout=30, json={
-            "livreur_id": livreur["id"], "clients": ids, "date_tournee": jour.isoformat(),
+            "livreur_id": livreur["id"], "clients": ids, "date_tournee": date_tournee.isoformat(),
             "periode": PERIODES[periode], "remplacer": remplacer})
         if t:
-            annoncer("success", f"Tournée attribuée à {t['livreur_nom']} : {t['nb_clients']} clients "
+            st.session_state.jour_a_afficher = date.fromisoformat(t["date_tournee"])
+            annoncer("success", f"Tournée du {date.fromisoformat(t['date_tournee']):%d/%m/%Y} attribuée à "
+                                f"{t['livreur_nom']} le {date_heure(t['attribuee_le'])} : {t['nb_clients']} clients "
                                 f"(limite {t['max_clients']}). Le livreur l'optimise depuis son écran.")
 
 
