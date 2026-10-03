@@ -1,4 +1,4 @@
-# Aide-mémoire des commandes — Projet ESIS
+# Aide-mémoire des commandes — Road Optim (projet ESIS)
 
 Toutes les commandes se lancent dans **PowerShell**, depuis le dossier du projet.
 Astuce : dans VS Code, `Ctrl + Shift + V` affiche ce fichier en mode lecture.
@@ -415,7 +415,7 @@ git diff backend/app/services/tournees.py
 | Compte bloqué | `deverrouiller` (section 6) |
 | Page Streamlit cassée, erreur « removeChild » | Chrome : « Ne jamais traduire ce site », puis `Ctrl + F5` |
 | L'interface ne change pas après une modification | `docker compose restart frontend`, puis `Ctrl + F5` |
-| Autre page sur localhost (ex. Sonarr sur :8989) | L'application ESIS est sur le port **8501** |
+| Autre page sur localhost (ex. Sonarr sur :8989) | L'application Road Optim est sur le port **8501** (livreur : **8000/livreur/**) |
 | Un conteneur ne démarre pas | `docker compose logs api` (ou `db`, `frontend`) pour lire l'erreur |
 
 > Ne jamais copier le contenu du fichier `.env` dans un message, une capture ou Git.

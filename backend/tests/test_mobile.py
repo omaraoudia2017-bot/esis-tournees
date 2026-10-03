@@ -4,12 +4,12 @@ sécurité stricte (CSP). Le parcours lui-même utilise les routes déjà testé
 
 def test_application_mobile_servie_avec_csp(client):
     r = client.get("/livreur/")
-    assert r.status_code == 200 and "ESIS Tournées" in r.text
+    assert r.status_code == 200 and "Road Optim" in r.text
     csp = r.headers["content-security-policy"]
     for directive in ("default-src 'none'", "script-src 'self'", "connect-src 'self'", "frame-ancestors 'none'"):
         assert directive in csp
     assert r.headers["x-frame-options"] == "DENY"
-    for fichier, type_attendu in (("app.js", "javascript"), ("app.css", "text/css")):
+    for fichier, type_attendu in (("app.js", "javascript"), ("app.css", "text/css"), ("logo.svg", "image/svg+xml")):
         f = client.get(f"/livreur/{fichier}")
         assert f.status_code == 200 and type_attendu in f.headers["content-type"]
 

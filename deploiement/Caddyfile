@@ -1,4 +1,4 @@
-# Proxy HTTPS de l'application ESIS (Caddy).
+# Proxy HTTPS de l'application Road Optim (Caddy).
 # ESIS_DOMAINE = localhost : certificat auto-signé par Caddy (démonstration, avertissement du navigateur).
 # ESIS_DOMAINE = un vrai nom de domaine pointant vers le serveur : certificat Let's Encrypt automatique
 # (ports 80 et 443 ouverts sur Internet).

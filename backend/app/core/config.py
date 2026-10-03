@@ -8,7 +8,7 @@ from sqlalchemy.engine import URL
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    app_name: str = "ESIS - Optimisation des tournées"
+    app_name: str = "Road Optim - Optimisation des tournées"
     environment: str = "dev"
     fuseau_horaire: str = "Europe/Paris"   # « tournée du jour » et heures de passage prévues
 
@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     max_echecs_connexion: int = 5          # verrouillage après 5 échecs
     verrouillage_minutes: int = 15
     limite_requetes_auth_par_minute: int = 10
-    totp_emetteur: str = "ESIS Tournees"   # nom affiché dans l'application d'authentification
+    totp_emetteur: str = "Road Optim"     # nom affiché dans l'application d'authentification (nouveaux enrôlements)
     nb_codes_secours: int = 10
     cors_origins: list[str] = []           # l'interface Streamlit appelle l'API côté serveur
 
@@ -63,7 +63,7 @@ class Settings(BaseSettings):
 
     # Conditions d'utilisation + information RGPD (fichier app/documents/conditions_utilisation_v<version>.md).
     # Changer la version oblige chaque livreur à relire et accepter le nouveau texte.
-    conditions_version: str = "1.0"
+    conditions_version: str = "1.1"
 
     # Écran du livreur : annulation d'un clic Démarrer / Terminer fait par erreur
     delai_annulation_pointage_min: int = 10
@@ -71,7 +71,7 @@ class Settings(BaseSettings):
     remarques_affichees: int = 5
 
     # Géocodage : Nominatim exige un user-agent qui identifie l'application
-    nominatim_user_agent: str = "esis-tournees/0.2 (projet etudiant ESIS)"
+    nominatim_user_agent: str = "road-optim/1.0 (projet etudiant ESIS)"
 
     @property
     def database_url(self) -> URL:

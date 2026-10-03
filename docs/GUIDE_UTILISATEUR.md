@@ -1,4 +1,4 @@
-# Guide utilisateur — ESIS, tournées de livraison
+# Guide utilisateur — Road Optim, tournées de livraison
 
 Deux profils utilisent l'application : le **livreur** (sur son smartphone) et le **planificateur**
 (administrateur, sur un ordinateur). L'adresse de l'application est communiquée par le service

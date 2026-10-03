@@ -1,4 +1,4 @@
-"""Interface ESIS (Streamlit) — connexion sécurisée (module 1), tournée du livreur (modules 2 et 3),
+"""Interface Road Optim (Streamlit) — connexion sécurisée (module 1), tournée du livreur (modules 2 et 3),
 espace administrateur (module 4, dans espace_admin.py).
 
 Le jeton de session reste côté serveur Streamlit (st.session_state) : il n'est jamais
@@ -23,9 +23,12 @@ API_URL = os.environ.get("API_URL", "http://api:8000")
 FUSEAU = ZoneInfo(os.environ.get("TZ", "Europe/Paris"))
 DERRIERE_PROXY = os.environ.get("ESIS_DERRIERE_PROXY") == "1"   # production : derrière Caddy (HTTPS)
 
+LOGO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo_road_optim.png")
+LOGO_LONG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo_road_optim_long.png")
 # Écran large pour l'administrateur (tableaux, carte), étroit pour le livreur (smartphone)
-st.set_page_config(page_title="ESIS Tournées",
+st.set_page_config(page_title="Road Optim", page_icon=LOGO,
                    layout="wide" if st.session_state.get("role") == "admin" else "centered")
+st.logo(LOGO_LONG, icon_image=LOGO, size="large")   # logo en haut à gauche, sur tous les écrans
 
 # L'interface est déjà en français : on déclare la langue et on interdit la traduction automatique
 # du navigateur. Sinon Chrome réécrit les textes de la page, ce qui casse l'affichage de
@@ -90,7 +93,8 @@ def ouvrir_session(donnees: dict) -> None:
 
 # --------------------------------------------------------------------------- écrans
 def ecran_identifiants() -> None:
-    st.title("ESIS — Connexion")
+    st.image(LOGO_LONG, width=300)
+    st.subheader("Connexion")
     if msg := st.session_state.pop("message", None):
         st.info(msg)
     with st.form("connexion"):

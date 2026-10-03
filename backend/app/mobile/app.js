@@ -1,4 +1,4 @@
-/* Application mobile du livreur (ESIS Tournées).
+/* Road Optim — application mobile du livreur.
 
    Page servie par l'API elle-même (/livreur) : elle appelle les MÊMES routes que l'interface
    Streamlit, avec les mêmes contrôles côté serveur (2FA, rôle, conditions, cloisonnement).
@@ -211,8 +211,8 @@ function ecranConnexion() {
   };
   return h("form", { classe: "centre", onsubmit: valider, autocomplete: "on" },
     h("div", { style: { display: "flex", flexDirection: "column", gap: "8px" } },
-      h("div", { classe: "logo" }, icone(["M3 7h11v9H3z", "M14 10h4l3 3v3h-7", "M5.2 17.5a1.8 1.8 0 1 0 3.6 0a1.8 1.8 0 1 0 -3.6 0", "M15.2 17.5a1.8 1.8 0 1 0 3.6 0a1.8 1.8 0 1 0 -3.6 0"], "#FFFFFF", 30)),
-      h("h1", { classe: "grand", texte: "ESIS Tournées" }),
+      h("img", { classe: "logo", src: "/livreur/logo.svg", alt: "", width: 60, height: 60 }),
+      h("h1", { classe: "marque" }, "Road ", h("span", { texte: "Optim" })),
       h("p", { classe: "texte", style: { color: "#5B6472" }, texte: "Connexion à votre espace livreur" })),
     boiteMessage(etat.messageConnexion ? { type: "alerte", texte: etat.messageConnexion } : null),
     erreur,

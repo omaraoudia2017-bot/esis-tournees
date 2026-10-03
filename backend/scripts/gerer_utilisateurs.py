@@ -111,7 +111,7 @@ def modifier(args, action: str) -> None:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Gestion des comptes ESIS")
+    parser = argparse.ArgumentParser(description="Gestion des comptes Road Optim")
     sous = parser.add_subparsers(dest="commande", required=True)
 
     p = sous.add_parser("creer")
