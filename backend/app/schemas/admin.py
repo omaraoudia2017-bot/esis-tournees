@@ -181,3 +181,51 @@ class TableauDeBordVue(BaseModel):
     comptes_verrouilles: int
     par_jour: list[dict]
     par_tournee: list[dict]
+
+
+# --------------------------------------------------------------------------- répartition en tournées
+class DemandeRepartition(BaseModel):
+    date_tournee: date | None = None
+    clients: list[str] = Field(min_length=1, max_length=500)
+    journee_continue: bool = False         # une seule plage (journée complète) au lieu de 3
+
+
+class ClientRepartition(BaseModel):
+    id_client: str
+    nom: str
+    code_postal: str
+    ville: str
+    creneau_debut: time | None
+    creneau_fin: time | None
+    type_camion_requis: str
+
+
+class GroupeRepartition(BaseModel):
+    numero: int
+    zone: str | None
+    periode: Literal["matin", "apres-midi", "soiree", "journee"]
+    type_camion: str
+    limite: int
+    codes_postaux: list[str]
+    clients: list[ClientRepartition]
+    livreur_propose_id: int | None
+
+
+class LivreurDisponible(BaseModel):
+    id: int
+    identifiant: str
+    nom: str
+    vehicule: str
+    type_camion: str
+
+
+class ClientExclu(BaseModel):
+    id_client: str
+    motif: str
+
+
+class PropositionRepartition(BaseModel):
+    date_tournee: date
+    groupes: list[GroupeRepartition]
+    livreurs_disponibles: list[LivreurDisponible]
+    exclus: list[ClientExclu]

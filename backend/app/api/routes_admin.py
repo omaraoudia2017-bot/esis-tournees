@@ -16,10 +16,11 @@ from app.core.config import get_settings
 from app.db.session import get_db
 from app.models import Client, JournalSecurite, Tournee, Utilisateur, Vehicule, Zone
 from app.models.enums import RoleUtilisateur, TypeCamion
-from app.schemas.admin import (BilanGeocodageVue, ClientResume, CompteVue, DemandeAjoutExistant,
-                               DemandeAnonymisation, DemandeCompte, DemandeCorrection,
-                               DemandeGeocodage, DemandeImport, DemandeTournee, DemandeTypeLivreur,
-                               DemandeVehicule,
+from app.schemas.admin import (BilanGeocodageVue, ClientExclu, ClientRepartition, ClientResume, CompteVue,
+                               DemandeAjoutExistant, DemandeAnonymisation, DemandeCompte, DemandeCorrection,
+                               DemandeGeocodage, DemandeImport, DemandeRepartition, DemandeTournee,
+                               DemandeTypeLivreur, DemandeVehicule, GroupeRepartition, LivreurDisponible,
+                               PropositionRepartition,
                                ReponseCompte, ReponseImport, RejetVue, TableauDeBordVue,
                                TourneeResume, VehiculeVue)
 from app.schemas.auth import EvenementJournal
@@ -28,6 +29,7 @@ from app.schemas.trajets import EtapePlanificateur, JourneePlanificateur
 from app.services import admin as service
 from app.services import import_csv
 from app.services import remarques as remarques_service
+from app.services import repartition as repartition_service
 from app.services import trajets as trajets_service
 from app.services.geocodage import Geocodeur
 from app.services.journal import contexte_depuis, tracer_consultation
@@ -225,7 +227,32 @@ def ajouter_client_existant(tournee_id: int, demande: DemandeAjoutExistant,
     return {"livraison_id": livraison.id, "message": "Client ajouté : le livreur doit relancer l'optimisation."}
 
 
-# --------------------------------------------------------------------------- clients et RGPD
+# --------------------------------------------------------------------------- répartition en tournées
+@router.post("/repartition", response_model=PropositionRepartition)
+def proposer_repartition(demande: DemandeRepartition, db: Session = Depends(get_db)):
+    """Classe une liste de clients (zone, plage horaire, type de camion), la coupe selon la limite
+    d'effectif de chaque zone et propose un livreur disponible par groupe. N'enregistre rien :
+    chaque groupe validé est créé avec POST /admin/tournees (mêmes contrôles)."""
+    reglages = get_settings()
+    jour = demande.date_tournee or service.aujourdhui(reglages)
+    if jour < service.aujourdhui(reglages):
+        raise HTTPException(422, "Impossible de planifier une tournée dans le passé.")
+    prop = repartition_service.proposer(db, reglages, jour, demande.clients, demande.journee_continue)
+    return PropositionRepartition(
+        date_tournee=jour,
+        groupes=[GroupeRepartition(
+            numero=k, zone=g.zone.nom if g.zone else None, periode=g.periode, type_camion=g.type_camion,
+            limite=g.limite, codes_postaux=g.codes_postaux,
+            clients=[ClientRepartition(id_client=c.id_client, nom=c.nom_client, code_postal=c.code_postal,
+                                       ville=c.ville, creneau_debut=c.creneau_debut, creneau_fin=c.creneau_fin,
+                                       type_camion_requis=c.type_camion_requis.value) for c in g.clients],
+            livreur_propose_id=g.livreur.id if g.livreur else None) for k, g in enumerate(prop.groupes, start=1)],
+        livreurs_disponibles=[LivreurDisponible(id=u.id, identifiant=u.identifiant, nom=f"{u.prenom} {u.nom}",
+                                                vehicule=v.immatriculation, type_camion=v.type_camion.value)
+                              for u, v in prop.livreurs],
+        exclus=[ClientExclu(id_client=i, motif=m) for i, m in prop.exclus])
+
+
 # --------------------------------------------------------------------------- journées de trajets (lecture seule)
 @router.get("/trajets", response_model=list[JourneePlanificateur])
 def journees_de_trajets(jour: date | None = Query(None, alias="date"), db: Session = Depends(get_db)):
@@ -243,11 +270,12 @@ def journees_de_trajets(jour: date | None = Query(None, alias="date"), db: Sessi
     ) for j, u, etapes in trajets_service.journees_du(db, jour)]
 
 
+# --------------------------------------------------------------------------- clients et RGPD
 @router.get("/clients", response_model=list[ClientResume])
 def rechercher_clients(recherche: str | None = Query(None, max_length=100),
                        a_corriger: bool = False, limite: int = Query(50, ge=1, le=500),
                        db: Session = Depends(get_db)):
-    """Recherche (identifiant, nom, adresse). `a_corriger` : clients réels mal localisés
+    """Recherche (identifiant, nom, adresse, code postal, ville). `a_corriger` : clients réels mal localisés
     (centre de la commune ou introuvables), à repositionner à la main."""
     return [_resume(c, zone) for c, zone in service.rechercher_clients(db, recherche, a_corriger, limite)]
 

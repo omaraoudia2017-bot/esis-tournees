@@ -326,7 +326,9 @@ def rechercher_clients(db: Session, texte: str | None, a_corriger: bool, limite:
         t = texte.strip()
         requete = requete.where(or_(Client.id_client.startswith(t, autoescape=True),
                                     Client.nom_client.icontains(t, autoescape=True),
-                                    Client.adresse.icontains(t, autoescape=True)))
+                                    Client.adresse.icontains(t, autoescape=True),
+                                    Client.code_postal.startswith(t, autoescape=True),
+                                    Client.ville.icontains(t, autoescape=True)))
     if a_corriger:
         # Position approximative (centre de la commune) ou introuvable : clients réels uniquement
         requete = requete.where(Client.source != SourceClient.SIMULATION, Client.actif.is_(True),

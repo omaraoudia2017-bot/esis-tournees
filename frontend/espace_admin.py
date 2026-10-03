@@ -12,7 +12,7 @@ import pandas as pd
 import streamlit as st
 from streamlit_folium import st_folium
 
-ONGLETS = ["Tableau de bord", "Tournées du jour", "Import CSV", "Livreurs", "Clients", "Sécurité"]
+ONGLETS = ["Tableau de bord", "Tournées du jour", "Import CSV", "Répartition", "Livreurs", "Clients", "Sécurité"]
 STATUTS_TOURNEE = {"planifiee": "Planifiée", "en_cours": "En cours", "terminee": "Terminée"}
 LIBELLES_STATUT = {"a_livrer": "À livrer", "en_cours": "En cours", "livre": "Livré", "absent": "Absent",
                    "refuse": "Refusé", "reporte": "À reporter"}
@@ -282,6 +282,8 @@ def onglet_import() -> None:
         if bilan:
             st.session_state.bilan_import = bilan
             st.session_state.ids_import = bilan["ids_valides"]
+            st.session_state.liste_repartition = list(bilan["ids_valides"])     # prêts pour la répartition
+            st.session_state.pop("proposition", None)
     bilan = st.session_state.get("bilan_import")
     if bilan:
         c1, c2, c3, c4 = st.columns(4)
@@ -301,13 +303,198 @@ def onglet_import() -> None:
                 "ligne": "Ligne", "id_client": "Identifiant", "motif": "Motif du rejet"}),
                 hide_index=True, width="stretch")
         if bilan["ids_valides"]:
-            st.info(f"{len(bilan['ids_valides'])} client(s) prêts : ils sont pré-remplis dans "
-                    "« Tournées du jour » pour l'attribution.")
+            st.info(f"{len(bilan['ids_valides'])} client(s) prêts : ouvrez la rubrique « Répartition » pour les "
+                    "classer par secteur et plage horaire et les attribuer en tournées.")
     if st.button("Géocoder les adresses en attente (lot de 20)"):
         with st.spinner("Géocodage (1 adresse par seconde)..."):
             res = api("POST", "/admin/clients/geocoder", timeout=180, json={"maximum": 20})
         if res:
             st.success(f"{res['traites']} adresse(s) traitée(s), {res['restants']} encore en attente.")
+
+
+# --------------------------------------------------------------------------- répartition en tournées
+LIBELLES_PERIODE = {"matin": "Matin", "apres-midi": "Après-midi", "soiree": "Soirée", "journee": "Journée complète"}
+RETIRER = "Retirer"
+
+
+def api_brut(methode: str, chemin: str, **kwargs) -> tuple[bool, dict | str]:
+    """Comme api(), mais renvoie l'erreur au lieu de l'afficher (bilan groupé de plusieurs appels)."""
+    r = outils.appel_api(methode, chemin, st.session_state.jeton, timeout=30, **kwargs)
+    if r is None:
+        return False, "Le serveur ne répond pas."
+    if r.status_code == 401:
+        outils.reinitialiser("Votre session a expiré. Veuillez vous reconnecter.")
+        st.rerun()
+    try:
+        corps = r.json()
+    except ValueError:
+        corps = {}
+    if r.status_code in (200, 201):
+        return True, corps
+    detail = corps.get("detail") if isinstance(corps, dict) else None
+    return False, detail if isinstance(detail, str) else f"Erreur {r.status_code}."
+
+
+def changer_liste(ids: list[str]) -> None:
+    st.session_state.liste_repartition = list(dict.fromkeys(ids))
+    st.session_state.pop("proposition", None)
+
+
+def onglet_repartition() -> None:
+    st.caption("Importez une liste de clients (rubrique Import CSV), complétez-la si besoin, puis laissez "
+               "l'application les classer par secteur (zone et code postal), plage horaire et type de camion. "
+               "Elle propose une tournée par groupe, dans la limite de chaque zone, avec un livreur disponible : "
+               "vous ajustez, puis vous validez.")
+    if bilan := st.session_state.pop("bilan_repartition", None):
+        for ok, texte in bilan:
+            (st.success if ok else st.error)(texte)
+    st.session_state.setdefault("liste_repartition", list(st.session_state.get("ids_import", [])))
+    liste = st.session_state.liste_repartition
+
+    # ---- 1. la liste
+    st.subheader(f"1. Clients à répartir ({len(liste)})")
+    c1, c2 = st.columns(2)
+    ids_import = st.session_state.get("ids_import", [])
+    if c1.button(f"Reprendre le dernier import ({len(ids_import)})", disabled=not ids_import, width="stretch"):
+        changer_liste(ids_import)
+        st.rerun()
+    if c2.button("Vider la liste", disabled=not liste, width="stretch"):
+        changer_liste([])
+        st.rerun()
+    if liste:
+        st.caption("Identifiants : " + ", ".join(liste[:12]) + (f" … (+{len(liste) - 12})" if len(liste) > 12 else ""))
+    with st.expander("Ajouter des clients déjà enregistrés"):
+        col_a, col_b = st.columns(2)
+        with col_a, st.form("rep_ajout_ids", clear_on_submit=True):
+            texte = st.text_area("Identifiants (un par ligne)", height=110)
+            if st.form_submit_button("Ajouter ces identifiants"):
+                nouveaux = [x.strip() for x in texte.replace(",", "\n").splitlines() if x.strip()]
+                changer_liste(liste + nouveaux)
+                st.rerun()
+        with col_b:
+            with st.form("rep_recherche"):
+                recherche = st.text_input("Code postal, ville ou nom", placeholder="69100")
+                chercher = st.form_submit_button("Rechercher")
+            if chercher and recherche.strip():
+                st.session_state.rep_resultats = api("GET", "/admin/clients",
+                                                     params={"recherche": recherche.strip(), "limite": 100}) or []
+            resultats = [c for c in st.session_state.get("rep_resultats", []) if c["id_client"] not in liste]
+            if resultats:
+                choix = st.multiselect(f"{len(resultats)} client(s) trouvé(s), hors liste", resultats, default=resultats,
+                                       format_func=lambda c: f"{c['code_postal']} {c['ville']} — {c['nom']} ({c['id_client']})")
+                if st.button("Ajouter la sélection", disabled=not choix):
+                    changer_liste(liste + [c["id_client"] for c in choix])
+                    st.session_state.pop("rep_resultats", None)
+                    st.rerun()
+
+    # ---- 2. classer et proposer
+    st.subheader("2. Classer et proposer des tournées")
+    c1, c2, c3 = st.columns([1, 1, 1])
+    jour = c1.date_input("Date des tournées", value=date.today(), min_value=date.today(), format="DD/MM/YYYY",
+                         key="rep_date")
+    continue_ = c2.toggle("Journée complète (une seule plage)", key="rep_continue",
+                          help="Par défaut, les clients sont séparés en matin, après-midi et soirée "
+                               "selon leur créneau, pour éviter de longues attentes.")
+    if c3.button("Classer et proposer", type="primary", disabled=not liste, width="stretch"):
+        prop = api("POST", "/admin/repartition", timeout=30, json={
+            "date_tournee": jour.isoformat(), "clients": liste[:500], "journee_continue": continue_})
+        if prop is not None:
+            st.session_state.proposition = prop
+            for cle in [k for k in st.session_state if str(k).startswith(("rep_g", "rep_l"))]:
+                del st.session_state[cle]
+            st.rerun()
+    prop = st.session_state.get("proposition")
+    if prop:
+        proposition(prop)
+
+
+def proposition(prop: dict) -> None:
+    jour = date.fromisoformat(prop["date_tournee"])
+    groupes = prop["groupes"]
+    if prop["exclus"]:
+        with st.expander(f"{len(prop['exclus'])} client(s) écarté(s)", expanded=True):
+            st.dataframe(pd.DataFrame(prop["exclus"]).rename(columns={"id_client": "Client", "motif": "Motif"}),
+                         hide_index=True, width="stretch")
+    if not groupes:
+        st.info("Aucun client à répartir.")
+        return
+
+    # Classement : code postal × plage horaire
+    lignes = [{"Code postal": f"{c['code_postal']} {c['ville']}", "Plage": LIBELLES_PERIODE[g["periode"]]}
+              for g in groupes for c in g["clients"]]
+    tableau = pd.crosstab(pd.DataFrame(lignes)["Code postal"], pd.DataFrame(lignes)["Plage"], margins=True,
+                          margins_name="Total")
+    ordre = [p for p in LIBELLES_PERIODE.values() if p in tableau.columns] + ["Total"]
+    with st.expander(f"Classement par code postal et plage horaire ({len(lignes)} clients)"):
+        st.dataframe(tableau[ordre], width="stretch")
+
+    st.subheader(f"3. Tournées proposées pour le {jour:%d/%m/%Y} ({len(groupes)})")
+    livreurs = prop["livreurs_disponibles"]
+    if not livreurs:
+        st.warning("Aucun livreur disponible ce jour-là (camion affecté et pas encore de tournée).")
+    numeros = [str(g["numero"]) for g in groupes]
+    edites, choix_livreurs = {}, {}
+    for g in groupes:
+        n = g["numero"]
+        titre = (f"Tournée {n} — {g['zone'] or 'zone non définie'} · {LIBELLES_PERIODE[g['periode']]} · camion "
+                 f"{g['type_camion']} · {len(g['clients'])} / {g['limite']} clients · CP {', '.join(g['codes_postaux'])}")
+        with st.expander(titre, expanded=len(groupes) <= 4):
+            compatibles = [l for l in livreurs if l["type_camion"] == g["type_camion"]]
+            options = [None] + compatibles
+            defaut = next((k for k, l in enumerate(options) if l and l["id"] == g["livreur_propose_id"]), 0)
+            choix_livreurs[n] = st.selectbox(
+                "Livreur", options, index=defaut, key=f"rep_l{n}",
+                format_func=lambda l: "— ne pas créer cette tournée —" if l is None
+                else f"{l['nom']} — {l['vehicule']} ({l['type_camion']})")
+            df = pd.DataFrame([{
+                "Tournée": str(n), "Client": c["nom"], "Code postal": c["code_postal"], "Ville": c["ville"],
+                "Créneau": f"{(c['creneau_debut'] or '')[:5]}–{(c['creneau_fin'] or '')[:5]}",
+                "id": c["id_client"]} for c in g["clients"]])
+            edites[n] = st.data_editor(
+                df, key=f"rep_g{n}", hide_index=True, width="stretch", disabled=["Client", "Code postal", "Ville",
+                                                                                  "Créneau", "id"],
+                column_config={"Tournée": st.column_config.SelectboxColumn(
+                    "Tournée", options=numeros + [RETIRER], required=True,
+                    help="Déplacer le client vers une autre tournée proposée, ou le retirer."),
+                    "id": st.column_config.TextColumn("Identifiant")})
+
+    # Nouvelle répartition après ajustements
+    cible: dict[int, list[str]] = {g["numero"]: [] for g in groupes}
+    for df in edites.values():
+        for _, ligne in df.iterrows():
+            if ligne["Tournée"] != RETIRER:
+                cible[int(ligne["Tournée"])].append(ligne["id"])
+    par_numero = {g["numero"]: g for g in groupes}
+    problemes = [f"Tournée {n} : {len(ids)} clients pour une limite de {par_numero[n]['limite']}."
+                 for n, ids in cible.items() if len(ids) > par_numero[n]["limite"]]
+    retenus = [l["id"] for n, l in choix_livreurs.items() if l and cible[n]]
+    if len(retenus) != len(set(retenus)):
+        problemes.append("Un même livreur est choisi pour deux tournées (une seule tournée par livreur et par jour).")
+    for p in problemes:
+        st.warning(p)
+    a_creer = [n for n, l in choix_livreurs.items() if l and cible[n]]
+    st.caption(f"{len(a_creer)} tournée(s) à créer, {sum(len(cible[n]) for n in a_creer)} client(s). "
+               "Chaque tournée est ensuite optimisée par le livreur depuis son application.")
+    if st.button("Créer les tournées", type="primary", disabled=bool(problemes) or not a_creer, width="stretch"):
+        bilan, crees = [], set()
+        for n in a_creer:
+            l = choix_livreurs[n]
+            ok, res = api_brut("POST", "/admin/tournees", json={
+                "livreur_id": l["id"], "clients": cible[n], "date_tournee": jour.isoformat(),
+                "periode": par_numero[n]["periode"], "remplacer": False})
+            if ok:
+                crees.add(n)
+                bilan.append((True, f"Tournée {n} attribuée à {l['nom']} : {len(cible[n])} clients."))
+            else:
+                bilan.append((False, f"Tournée {n} ({l['nom']}) non créée : {res}"))
+        # Les clients placés sortent de la liste ; les tournées en échec restent à corriger
+        places = {i for n in crees for i in cible[n]}
+        st.session_state.liste_repartition = [i for i in st.session_state.liste_repartition if i not in places]
+        st.session_state.pop("proposition", None)
+        st.session_state.bilan_repartition = bilan + ([(True, "Retrouvez-les dans « Tournées du jour ».")]
+                                                      if crees else [])
+        st.session_state.jour_a_afficher = jour
+        st.rerun()
 
 
 # --------------------------------------------------------------------------- livreurs
@@ -584,6 +771,7 @@ def ecran_admin(profil: dict, outils_communs) -> None:
         "Tableau de bord": onglet_tableau_de_bord,
         "Tournées du jour": onglet_tournees,
         "Import CSV": onglet_import,
+        "Répartition": onglet_repartition,
         "Livreurs": onglet_livreurs,
         "Clients": onglet_clients,
         "Sécurité": onglet_securite,

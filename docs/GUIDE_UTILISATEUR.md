@@ -87,6 +87,14 @@ séparateur « , » ou « ; »). Le bilan indique les clients créés, mis à jo
 leur motif. Les nouvelles adresses sont localisées automatiquement (environ une par seconde) ; le
 bouton « Géocoder les adresses en attente » traite le reste par lots.
 
+**Répartition** (après un import) : la liste reprend les clients du dernier import ; on peut la
+compléter par identifiant ou par une recherche (code postal, ville, nom). « Classer et proposer »
+range les clients par secteur (zone, code postal), plage horaire (matin, après-midi, soirée, ou
+journée complète) et type de camion, coupe chaque groupe selon la limite de la zone et propose un
+livreur disponible (bon camion, pas encore de tournée ce jour-là). Chaque client peut être déplacé
+vers une autre tournée ou retiré ; on choisit le livreur, puis « Créer les tournées ». Les clients
+déjà planifiés ce jour-là ou non localisés sont écartés, avec le motif.
+
 **Livreurs**
 - Créer un compte : un **code d'activation** est affiché dans un encadré jusqu'au clic sur « J'ai remis
   le code au salarié » ; le remettre en main propre ou par téléphone (jamais par e-mail ni en capture
