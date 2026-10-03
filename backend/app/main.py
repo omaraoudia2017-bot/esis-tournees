@@ -1,6 +1,10 @@
 """Point d'entrée de l'API FastAPI."""
+from pathlib import Path
+
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
@@ -36,6 +40,13 @@ async def entetes_securite(request: Request, call_next):
     reponse.headers["X-Content-Type-Options"] = "nosniff"
     reponse.headers["X-Frame-Options"] = "DENY"
     reponse.headers["Referrer-Policy"] = "no-referrer"
+    if request.url.path.startswith("/livreur"):
+        # Application mobile : uniquement les scripts et styles servis ici, aucune ressource externe
+        reponse.headers["Content-Security-Policy"] = (
+            "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+            "connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; "
+            "frame-ancestors 'none'")
+        reponse.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     if request.url.path.startswith(("/auth", "/moi", "/tournees", "/livraisons", "/remarques", "/conditions",
                                      "/admin")):
         # jamais de jeton ni de donnée client (digicode, téléphone) dans un cache
@@ -47,6 +58,15 @@ app.include_router(routes_auth.router)
 app.include_router(routes_conditions.router)
 app.include_router(routes_admin.router)
 app.include_router(routes_tournees.router)
+
+# Application mobile du livreur (HTML/CSS/JS statiques) : mêmes routes et mêmes contrôles que
+# l'interface Streamlit. http://localhost:8000/livreur/
+app.mount("/livreur", StaticFiles(directory=Path(__file__).parent / "mobile", html=True), name="livreur")
+
+
+@app.get("/", include_in_schema=False)
+def accueil() -> RedirectResponse:
+    return RedirectResponse("/livreur/")
 
 
 @app.get("/health", tags=["Supervision"])

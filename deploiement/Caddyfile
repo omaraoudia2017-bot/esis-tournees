@@ -15,8 +15,18 @@
 		-Server
 	}
 
-	# Interface Streamlit (WebSocket géré automatiquement). L'API n'est jamais exposée directement.
-	reverse_proxy frontend:8501
+	# Application mobile du livreur et SEULES les routes dont elle a besoin. Les routes /admin,
+	# /docs et la documentation de l'API ne sont jamais exposées : l'espace planificateur passe
+	# par l'interface Streamlit, qui appelle l'API sur le réseau interne Docker.
+	@mobile path /livreur /livreur/* /auth/* /conditions /conditions/* /moi/* /tournees/* /livraisons/* /remarques/*
+	handle @mobile {
+		reverse_proxy api:8000
+	}
+
+	# Interface Streamlit (WebSocket géré automatiquement)
+	handle {
+		reverse_proxy frontend:8501
+	}
 
 	log {
 		output stdout
