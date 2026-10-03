@@ -82,6 +82,8 @@ def moi(u: Utilisateur = Depends(utilisateur_courant)):
     return ProfilUtilisateur(id=u.id, identifiant=u.identifiant, nom=u.nom, prenom=u.prenom,
                              role=u.role.value, totp_active=u.totp_active,
                              derniere_connexion=u.derniere_connexion,
+                             type_livreur=u.type_livreur.value if u.type_livreur else None,
+                             domicile_renseigne=bool(u.domicile_position),
                              conditions_a_accepter=doit_accepter(u, get_settings()),
                              conditions_version=u.conditions_version,
                              conditions_acceptees_le=u.conditions_acceptees_le)

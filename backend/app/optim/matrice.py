@@ -48,19 +48,25 @@ def longueur_parcours(matrice: list[list[int]], ordre: list[int], retour_depot: 
 
 
 def construire_matrice_depart(depart: Point, depot: Point, clients: list[Point],
-                              coefficient_routier: float, vitesse_kmh: float) -> MatriceTrajets:
-    """Matrice pour recalculer l'itinéraire RESTANT en cours de tournée.
+                              coefficient_routier: float, vitesse_kmh: float,
+                              arrivee: Point | None = None) -> MatriceTrajets:
+    """Matrice avec un point de départ et un point d'arrivée qui peuvent différer du dépôt.
 
-    Le nœud 0 devient asymétrique : on en PART depuis la position actuelle du livreur
-    (ligne 0) et on y REVIENT au dépôt (colonne 0). Le solveur et `evaluer_parcours`
-    restent inchangés : ils lisent toujours matrice[de][vers].
+    Le nœud 0 devient asymétrique : on en PART depuis `depart` (ligne 0 : position actuelle du
+    livreur en cours de tournée, sinon le dépôt) et on y REVIENT à `arrivee` (colonne 0 : domicile
+    du livreur interne, sinon le dépôt). Le solveur et `evaluer_parcours` restent inchangés :
+    ils lisent toujours matrice[de][vers].
     """
+    arrivee = arrivee or depot
     m = construire_matrice([depot, *clients], coefficient_routier, vitesse_kmh)
-    if depart == depot:
+    if depart == depot and arrivee == depot:
         return m
-    depuis = construire_matrice([depart, depot, *clients], coefficient_routier, vitesse_kmh)
-    m.distances_m[0][0], m.durees_s[0][0] = depuis.distances_m[0][1], depuis.durees_s[0][1]
-    for j in range(1, m.taille):                 # position actuelle -> client j
-        m.distances_m[0][j] = depuis.distances_m[0][j + 1]
-        m.durees_s[0][j] = depuis.durees_s[0][j + 1]
+    # Trajets depuis / vers les deux points particuliers (indices 0 et 1), puis les clients (2..)
+    tous = construire_matrice([depart, arrivee, *clients], coefficient_routier, vitesse_kmh)
+    m.distances_m[0][0], m.durees_s[0][0] = tous.distances_m[0][1], tous.durees_s[0][1]
+    for j in range(1, m.taille):
+        m.distances_m[0][j] = tous.distances_m[0][j + 1]      # départ -> client j
+        m.durees_s[0][j] = tous.durees_s[0][j + 1]
+        m.distances_m[j][0] = tous.distances_m[j + 1][1]      # client j -> arrivée
+        m.durees_s[j][0] = tous.durees_s[j + 1][1]
     return m

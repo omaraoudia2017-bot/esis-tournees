@@ -16,6 +16,7 @@ ONGLETS = ["Tableau de bord", "Tournées du jour", "Import CSV", "Livreurs", "Cl
 STATUTS_TOURNEE = {"planifiee": "Planifiée", "en_cours": "En cours", "terminee": "Terminée"}
 LIBELLES_STATUT = {"a_livrer": "À livrer", "en_cours": "En cours", "livre": "Livré", "absent": "Absent",
                    "refuse": "Refusé", "reporte": "À reporter"}
+TYPES_LIVREUR = {"Livreur interne": "interne", "Livreur prestataire": "prestataire"}
 PERIODES = {"Matin (7 h – 14 h)": "matin", "Après-midi (13 h – 19 h)": "apres-midi",
             "Soirée (17 h – 22 h)": "soiree", "Journée complète": "journee"}
 EVENEMENTS = ["(tous)", "CONNEXION_ANORMALE", "CONNEXION_ECHEC", "CONNEXION_REUSSIE", "COMPTE_VERROUILLE",
@@ -23,7 +24,7 @@ EVENEMENTS = ["(tous)", "CONNEXION_ANORMALE", "CONNEXION_ECHEC", "CONNEXION_REUS
               "ADMIN_REINITIALISER_MDP", "ADMIN_REINITIALISER_2FA", "ADMIN_ATTRIBUTION_TOURNEE",
               "ADMIN_CORRECTION_CLIENT", "RGPD_EXPORT", "RGPD_ANONYMISATION", "AJOUT_CLIENT_VOLEE",
               "CONSULTATION_TOURNEE", "POINTAGE_ANNULE", "REMARQUE_AJOUTEE", "REMARQUE_SUPPRIMEE",
-              "CONDITIONS_ACCEPTEES"]
+              "CONDITIONS_ACCEPTEES", "ADMIN_TYPE_LIVREUR", "DOMICILE_MODIFIE", "DOMICILE_SUPPRIME"]
 
 outils = None          # fourni par app.py : appel_api, reinitialiser, carte_tournee, heure_locale
 
@@ -285,6 +286,9 @@ def onglet_livreurs() -> None:
     vehicules = api("GET", "/admin/vehicules") or []
     st.dataframe(pd.DataFrame([{
         "Identifiant": c["identifiant"], "Nom": f"{c['prenom']} {c['nom']}", "Rôle": c["role"],
+        "Type": c["type_livreur"] or "—",
+        "Domicile": ("renseigné" if c["domicile_renseigne"] else "à renseigner par le livreur")
+        if c["type_livreur"] == "interne" else "—",
         "Actif": c["actif"], "2FA": c["totp_active"], "Verrouillé": c["verrouille"],
         "Camion": f"{c['vehicule']} ({c['type_camion']})" if c["vehicule"] else "—",
         "Dernière connexion": date_heure(c["derniere_connexion"]),
@@ -300,14 +304,23 @@ def onglet_livreurs() -> None:
         prenom = st.text_input("Prénom", max_chars=80)
         nom = st.text_input("Nom", max_chars=80)
         role = st.radio("Rôle", ["livreur", "admin"], horizontal=True)
+        type_livreur = st.radio("Type de livreur", list(TYPES_LIVREUR), horizontal=True, index=None,
+                                help="Interne : rentre chez lui avec le camion (départ et retour à son "
+                                     "domicile, qu'il renseigne lui-même). Prestataire : rend le camion "
+                                     "à l'entrepôt (départ et retour au dépôt).")
         libres = [None] + [v for v in vehicules if v["actif"]]
         vehicule = st.selectbox("Camion (livreur)", libres, format_func=lambda v: "—" if v is None else
                                 f"{v['immatriculation']} ({v['type_camion']})" +
                                 (f" — utilisé par {v['utilise_par']}" if v["utilise_par"] else ""))
         if st.form_submit_button("Créer le compte", type="primary"):
-            res = api("POST", "/admin/utilisateurs", attendu=(201,), json={
-                "identifiant": identifiant.strip().lower(), "nom": nom, "prenom": prenom, "role": role,
-                "vehicule_id": vehicule["id"] if vehicule and role == "livreur" else None})
+            res = None
+            if role == "livreur" and type_livreur is None:
+                st.error("Choisissez « Livreur interne » ou « Livreur prestataire ».")
+            else:
+                res = api("POST", "/admin/utilisateurs", attendu=(201,), json={
+                    "identifiant": identifiant.strip().lower(), "nom": nom, "prenom": prenom, "role": role,
+                    "vehicule_id": vehicule["id"] if vehicule and role == "livreur" else None,
+                    "type_livreur": TYPES_LIVREUR[type_livreur] if role == "livreur" else None})
             if res:
                 st.session_state.mdp_a_transmettre = (res["compte"]["identifiant"],
                                                       res["mot_de_passe_temporaire"])
@@ -344,6 +357,16 @@ def gerer_compte(c: dict, vehicules: list[dict]) -> None:
         action("reinitialiser-2fa", f"2FA de {c['identifiant']} réinitialisée : nouveau QR code à la "
                                     "prochaine connexion.")
     if c["role"] == "livreur":
+        libelles = list(TYPES_LIVREUR)
+        actuel_type = next((i for i, v in enumerate(TYPES_LIVREUR.values()) if v == c["type_livreur"]), 1)
+        choix = st.radio("Type de livreur", libelles, index=actuel_type, horizontal=True,
+                         key=f"type_livreur_{c['id']}")
+        if TYPES_LIVREUR[choix] != c["type_livreur"] and st.button("Enregistrer le type", width="stretch"):
+            if api("POST", f"/admin/utilisateurs/{c['id']}/type-livreur",
+                   json={"type_livreur": TYPES_LIVREUR[choix]}):
+                annoncer("success", f"{c['identifiant']} : {choix.lower()}." + (
+                    " Son adresse de domicile a été effacée." if TYPES_LIVREUR[choix] == "prestataire"
+                    and c["domicile_renseigne"] else ""))
         options = [None] + [v for v in vehicules if v["actif"]]
         actuel = next((i for i, v in enumerate(options) if v and v["id"] == c["vehicule_id"]), 0)
         vehicule = st.selectbox("Camion attribué", options, index=actuel, key=f"vehicule_{c['id']}",

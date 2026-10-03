@@ -75,6 +75,12 @@ class TourneeVue(BaseModel):
     duree_estimee_min: int | None
     depot: Point
     livraisons: list[LivraisonVue]
+    # Livreur interne : départ domicile -> dépôt, retour au domicile sauf colis non livrés
+    type_livreur: str | None = None
+    retour: Literal["depot", "domicile"] = "depot"
+    colis_a_rapporter: int = 0                 # absents, refus, clients à reporter
+    domicile: Point | None = None              # visible par le livreur lui-même uniquement
+    trajet_domicile_depot_min: int | None = None
     annulation_possible: AnnulationPossible | None = None
 
 
@@ -88,6 +94,7 @@ class ReponseOptimisation(BaseModel):
     duree_calcul_s: float
     a_reporter: list[str]
     temps_service: Literal["modele", "fixe"] = "fixe"
+    retour: Literal["depot", "domicile"] = "depot"
 
 
 class DemandeFin(BaseModel):
@@ -133,3 +140,20 @@ class ReponseAnnulation(BaseModel):
 class DemandeRemarque(BaseModel):
     texte: str = Field(min_length=3, max_length=300,
                        description="Information utile pour les prochaines livraisons à cette adresse")
+
+
+class DemandeDomicile(BaseModel):
+    """Adresse de départ et de retour du livreur interne (saisie par le livreur lui-même)."""
+    voie: str = Field(min_length=3, max_length=200, description="numéro et rue")
+    code_postal: str = Field(pattern=r"^[0-9]{5}$")
+    ville: str = Field(min_length=2, max_length=100)
+
+
+class DomicileVue(BaseModel):
+    type_livreur: str | None
+    renseigne: bool
+    adresse: str | None                        # renvoyée au livreur lui-même uniquement
+    modifie_le: datetime | None
+    trajet_depot_km: float | None = None
+    trajet_depot_min: int | None = None
+    avertissement: str | None = None

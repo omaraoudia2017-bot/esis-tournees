@@ -24,6 +24,8 @@ class CompteVue(BaseModel):
     derniere_connexion: datetime | None
     conditions_version: str | None = None
     conditions_acceptees_le: datetime | None = None
+    type_livreur: str | None = None
+    domicile_renseigne: bool = False           # jamais l'adresse elle-même (minimisation)
 
 
 class DemandeCompte(BaseModel):
@@ -32,12 +34,19 @@ class DemandeCompte(BaseModel):
     prenom: str = Field(min_length=1, max_length=80)
     role: Literal["livreur", "admin"] = "livreur"
     vehicule_id: int | None = None
+    # Livreur : interne (rentre avec le camion, départ/retour à son domicile) ou prestataire
+    # (rend le camion au dépôt). Par défaut : prestataire.
+    type_livreur: Literal["interne", "prestataire"] | None = None
 
 
 class ReponseCompte(BaseModel):
     compte: CompteVue
     mot_de_passe_temporaire: str | None = Field(
         None, description="Affiché une seule fois : à transmettre au salarié par un canal sûr")
+
+
+class DemandeTypeLivreur(BaseModel):
+    type_livreur: Literal["interne", "prestataire"]
 
 
 class DemandeVehicule(BaseModel):

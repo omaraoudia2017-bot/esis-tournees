@@ -25,8 +25,9 @@ from app.core.security import generer_mdp, hacher_mdp
 from app.models import (CacheGeocodage, Client, CodeSecours, JournalSecurite, Livraison, Tournee,
                         Utilisateur, Vehicule, Zone)
 from app.models.enums import (PrecisionGeocodage, RoleUtilisateur, SourceClient, StatutLivraison,
-                              StatutTournee, TypeCamion)
+                              StatutTournee, TypeCamion, TypeLivreur)
 from app.optim.segmentation import Periode
+from app.services.domicile import effacer_domicile
 from app.services.geocodage import cle_cache
 from app.services.journal import ContexteRequete, journaliser
 from app.services.planification import estimer_temps_service_s, periodes
@@ -84,7 +85,8 @@ def _vehicule_valide(db: Session, vehicule_id: int | None) -> Vehicule | None:
 
 
 def creer_compte(db: Session, acteur: Acteur, identifiant: str, nom: str, prenom: str,
-                 role: RoleUtilisateur, vehicule_id: int | None) -> tuple[Utilisateur, str]:
+                 role: RoleUtilisateur, vehicule_id: int | None,
+                 type_livreur: str | None = None) -> tuple[Utilisateur, str]:
     """Retourne (compte, mot de passe initial). Le mot de passe n'est affiché qu'une fois ;
     la 2FA est imposée à la première connexion (enrôlement par QR code)."""
     identifiant = identifiant.strip().lower()
@@ -96,10 +98,13 @@ def creer_compte(db: Session, acteur: Acteur, identifiant: str, nom: str, prenom
     mdp = generer_mdp()
     u = Utilisateur(identifiant=identifiant, nom=" ".join(nom.upper().split()),
                     prenom=" ".join(prenom.split()), role=role, mot_de_passe_hash=hacher_mdp(mdp),
-                    vehicule_id=vehicule.id if vehicule else None)
+                    vehicule_id=vehicule.id if vehicule else None,
+                    type_livreur=TypeLivreur(type_livreur or "prestataire")
+                    if role == RoleUtilisateur.LIVREUR else None)
     db.add(u)
     db.flush()
-    acteur.tracer(db, "ADMIN_CREATION_COMPTE", cible=identifiant, role=role.value)
+    acteur.tracer(db, "ADMIN_CREATION_COMPTE", cible=identifiant, role=role.value,
+                  type_livreur=u.type_livreur.value if u.type_livreur else None)
     db.commit()
     return u, mdp
 
@@ -137,6 +142,21 @@ def agir_sur_compte(db: Session, acteur: Acteur, utilisateur_id: int, action: st
     acteur.tracer(db, f"ADMIN_{action.upper().replace('-', '_')}", cible=u.identifiant)
     db.commit()
     return u, mdp
+
+
+def changer_type_livreur(db: Session, acteur: Acteur, utilisateur_id: int, type_livreur: str) -> Utilisateur:
+    u = db.get(Utilisateur, utilisateur_id)
+    if u is None:
+        raise ErreurAdmin(404, "Compte introuvable.")
+    if u.role != RoleUtilisateur.LIVREUR:
+        raise ErreurAdmin(422, "Seul un livreur est interne ou prestataire.")
+    u.type_livreur = TypeLivreur(type_livreur)
+    # Minimisation : un prestataire n'a pas besoin d'adresse de domicile dans l'application
+    efface = effacer_domicile(u) if u.type_livreur == TypeLivreur.PRESTATAIRE else False
+    acteur.tracer(db, "ADMIN_TYPE_LIVREUR", cible=u.identifiant, type_livreur=type_livreur,
+                  domicile_efface=efface)
+    db.commit()
+    return u
 
 
 def affecter_vehicule(db: Session, acteur: Acteur, utilisateur_id: int,

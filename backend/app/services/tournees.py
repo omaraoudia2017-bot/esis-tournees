@@ -26,6 +26,7 @@ from app.models.enums import (PrecisionGeocodage, SourceClient, StatutLivraison,
 from app.optim.cvrptw import optimiser_tournees
 from app.optim.matrice import Point, construire_matrice, longueur_parcours
 from app.optim.probleme import JOURNEE_S, en_secondes, evaluer_parcours
+from app.services.domicile import position_domicile, trajet_domicile_depot
 from app.services.geocodage import GeocoderServiceError, geocoder_avec_cache
 from app.services.journal import ContexteRequete, journaliser
 from app.services.nettoyage import (est_professionnel, extraire_acces, nettoyer_digicode,
@@ -89,6 +90,7 @@ class ResultatOptimisation:
     duree_calcul_s: float
     a_reporter: list[str] = field(default_factory=list)
     temps_service: str = "fixe"        # "modele" : temps sur place prédits par le Random Forest
+    retour: str = "depot"              # "domicile" : livreur interne sans colis à rapporter
 
 
 def bornes_horaires(tournee: Tournee, reglages: Settings) -> tuple[int, int]:
@@ -156,13 +158,30 @@ def optimiser_tournee(db: Session, tournee: Tournee, reglages: Settings) -> Resu
     vehicule = db.get(Vehicule, tournee.vehicule_id) if tournee.vehicule_id else None
     clients = [c for _, c in localises]
     temps_s, source_temps = estimer_temps_service_s(clients, reglages)
-    probleme = construire_probleme(
-        clients, reglages, tournee.max_clients, nb_vehicules=1,
-        depart_s=depart_s, fin_s=fin_s, position=position, temps_service_s=temps_s,
-        # Segmentation de flotte : un client hayon ne peut pas être servi par un camion normal
-        types_vehicules=[vehicule.type_camion.value] if vehicule else None,
-    )
-    res = optimiser_tournees(probleme, reglages.optim_temps_limite_s)
+
+    # Livreur interne : le matin domicile -> dépôt (chargement), puis clients, puis retour au
+    # DOMICILE... sauf s'il reste des colis non livrés (absent, refus, client à reporter) : ils
+    # doivent être rapportés au DÉPÔT. Prestataire : retour au dépôt dans tous les cas.
+    livreur = db.get(Utilisateur, tournee.livreur_id)
+    domicile = position_domicile(livreur)
+    non_livres = [l for l, _ in faites if l.statut != StatutLivraison.LIVRE] + non_localises
+
+    def resoudre(arrivee: Point | None, limite_s: float):
+        p = construire_probleme(
+            clients, reglages, tournee.max_clients, nb_vehicules=1,
+            depart_s=depart_s, fin_s=fin_s, position=position, temps_service_s=temps_s,
+            # Segmentation de flotte : un client hayon ne peut pas être servi par un camion normal
+            types_vehicules=[vehicule.type_camion.value] if vehicule else None,
+            arrivee=arrivee,
+        )
+        return p, optimiser_tournees(p, limite_s)
+
+    arrivee = domicile if domicile is not None and not non_livres else None
+    probleme, res = resoudre(arrivee, reglages.optim_temps_limite_s)
+    if arrivee is not None and res.non_servis:
+        # Des clients restent à reporter : leurs colis repartent au dépôt -> nouveau calcul
+        arrivee = None
+        probleme, res = resoudre(None, max(1.0, reglages.optim_temps_limite_s / 2))
     ordre, evaluation = res.tournees[0], res.evaluations[0]
     avant = evaluer_parcours(probleme, sorted(ordre))     # mêmes clients, ordre actuel de la liste
 
@@ -181,8 +200,10 @@ def optimiser_tournee(db: Session, tournee: Tournee, reglages: Settings) -> Resu
         livraison.statut = StatutLivraison.REPORTE
 
     tournee.optimisee_le = maintenant()
+    trajet_matin = trajet_domicile_depot(livreur, reglages)       # livreur interne uniquement
     tournee.distance_totale_km = round(_km_parcourus(faites, depot, reglages)
-                                       + evaluation.distance_m / 1000, 2)
+                                       + evaluation.distance_m / 1000
+                                       + (trajet_matin[0] if trajet_matin else 0), 2)
     tournee.duree_estimee_min = max(0, (evaluation.retour_depot_s - depart_tournee_s) // 60)
     db.commit()
 
@@ -196,6 +217,7 @@ def optimiser_tournee(db: Session, tournee: Tournee, reglages: Settings) -> Resu
         duree_calcul_s=res.duree_calcul_s,
         a_reporter=[c.id_client for _, c in reportes],
         temps_service=source_temps,
+        retour="domicile" if arrivee is not None else "depot",
     )
 
 
@@ -352,6 +374,21 @@ def terminer_livraison(db: Session, livraison: Livraison, issue: StatutLivraison
     db.commit()
     db.refresh(livraison)          # relit temps_service_reel_s, calculé par PostgreSQL
     return livraison
+
+
+# --------------------------------------------------------------------------- fin de tournée
+NON_LIVRES = (StatutLivraison.ABSENT, StatutLivraison.REFUSE, StatutLivraison.REPORTE)
+
+
+def retour_prevu(db: Session, tournee: Tournee, livreur: Utilisateur | None = None) -> tuple[str, int]:
+    """("domicile" | "depot", nombre de colis à rapporter au dépôt).
+    Livreur interne avec adresse : domicile, sauf colis non livrés (absent, refus, à reporter)."""
+    livreur = livreur or db.get(Utilisateur, tournee.livreur_id)
+    nb = db.scalar(select(func.count()).select_from(Livraison).where(
+        Livraison.tournee_id == tournee.id, Livraison.statut.in_(NON_LIVRES)))
+    if position_domicile(livreur) is None or nb:
+        return "depot", nb
+    return "domicile", 0
 
 
 # --------------------------------------------------------------------------- annulation d'un clic

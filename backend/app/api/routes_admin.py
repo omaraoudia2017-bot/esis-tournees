@@ -18,7 +18,8 @@ from app.models import Client, JournalSecurite, Tournee, Utilisateur, Vehicule, 
 from app.models.enums import RoleUtilisateur, TypeCamion
 from app.schemas.admin import (BilanGeocodageVue, ClientResume, CompteVue, DemandeAjoutExistant,
                                DemandeAnonymisation, DemandeCompte, DemandeCorrection,
-                               DemandeGeocodage, DemandeImport, DemandeTournee, DemandeVehicule,
+                               DemandeGeocodage, DemandeImport, DemandeTournee, DemandeTypeLivreur,
+                               DemandeVehicule,
                                ReponseCompte, ReponseImport, RejetVue, TableauDeBordVue,
                                TourneeResume, VehiculeVue)
 from app.schemas.auth import EvenementJournal
@@ -51,7 +52,9 @@ def _compte(u: Utilisateur, v: Vehicule | None) -> CompteVue:
                      type_camion=v.type_camion.value if v else None,
                      derniere_connexion=u.derniere_connexion,
                      conditions_version=u.conditions_version,
-                     conditions_acceptees_le=u.conditions_acceptees_le)
+                     conditions_acceptees_le=u.conditions_acceptees_le,
+                     type_livreur=u.type_livreur.value if u.type_livreur else None,
+                     domicile_renseigne=bool(u.domicile_position))
 
 
 def _compte_de(db: Session, u: Utilisateur) -> CompteVue:
@@ -84,7 +87,8 @@ def creer_compte(demande: DemandeCompte, a: service.Acteur = Depends(acteur), db
     """Le mot de passe initial est généré et renvoyé UNE fois ; la 2FA est imposée à la 1re connexion."""
     try:
         u, mdp = service.creer_compte(db, a, demande.identifiant, demande.nom, demande.prenom,
-                                      RoleUtilisateur(demande.role), demande.vehicule_id)
+                                      RoleUtilisateur(demande.role), demande.vehicule_id,
+                                      demande.type_livreur)
     except service.ErreurAdmin as e:
         raise _http(e) from None
     return ReponseCompte(compte=_compte_de(db, u), mot_de_passe_temporaire=mdp)
@@ -95,6 +99,16 @@ def affecter_vehicule(utilisateur_id: int, demande: DemandeVehicule,
                       a: service.Acteur = Depends(acteur), db: Session = Depends(get_db)):
     try:
         return _compte_de(db, service.affecter_vehicule(db, a, utilisateur_id, demande.vehicule_id))
+    except service.ErreurAdmin as e:
+        raise _http(e) from None
+
+
+@router.post("/utilisateurs/{utilisateur_id}/type-livreur", response_model=CompteVue)
+def changer_type_livreur(utilisateur_id: int, demande: DemandeTypeLivreur,
+                         a: service.Acteur = Depends(acteur), db: Session = Depends(get_db)):
+    """Interne <-> prestataire. Passer en prestataire efface l'adresse du domicile."""
+    try:
+        return _compte_de(db, service.changer_type_livreur(db, a, utilisateur_id, demande.type_livreur))
     except service.ErreurAdmin as e:
         raise _http(e) from None
 

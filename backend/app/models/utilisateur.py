@@ -6,7 +6,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 from app.db.types import EncryptedText
-from app.models.enums import RoleUtilisateur, pg_enum
+from app.models.enums import RoleUtilisateur, TypeLivreur, pg_enum
 
 
 class Utilisateur(Base):
@@ -34,6 +34,15 @@ class Utilisateur(Base):
 
     # Jetons émis avant cette date refusés (désactivation, réinitialisation du mot de passe ou 2FA)
     sessions_invalidees_le: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # Livreur interne (rentre avec le camion) ou prestataire (rend le camion au dépôt). NULL = admin.
+    type_livreur: Mapped[TypeLivreur | None] = mapped_column(pg_enum(TypeLivreur, "type_livreur"))
+    # Livreur interne : adresse de départ et de retour de la tournée, saisie par le livreur lui-même.
+    # Donnée personnelle sensible (domicile) : adresse ET position chiffrées (Fernet), jamais mises
+    # dans le cache de géocodage partagé, jamais affichées à l'administrateur.
+    domicile_adresse: Mapped[str | None] = mapped_column(EncryptedText)
+    domicile_position: Mapped[str | None] = mapped_column(EncryptedText)    # "lat;lon" (4 décimales)
+    domicile_maj_le: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Conditions d'utilisation et information RGPD : version lue et acceptée, et quand.
     # Une nouvelle version (CONDITIONS_VERSION) oblige le livreur à les relire et à les accepter.

@@ -74,13 +74,15 @@ def construire_probleme(clients: list[Client], reglages: Settings, max_clients: 
                         nb_vehicules: int = 1, depart_s: int | None = None, fin_s: int | None = None,
                         types_vehicules: list[str] | None = None,
                         position: Point | None = None,
-                        temps_service_s: list[int] | None = None) -> ProblemeTournees:
+                        temps_service_s: list[int] | None = None,
+                        arrivee: Point | None = None) -> ProblemeTournees:
     """`position` : point de départ du livreur en cours de tournée (sinon le dépôt).
-    Le retour se fait toujours au dépôt. `temps_service_s` : par défaut, estimé par le modèle."""
+    `arrivee` : fin de tournée (domicile du livreur interne), sinon retour au dépôt.
+    `temps_service_s` : par défaut, estimé par le modèle."""
     depot = Point(reglages.depot_latitude, reglages.depot_longitude)
     points = [Point(float(c.latitude), float(c.longitude)) for c in clients]
     matrice = construire_matrice_depart(position or depot, depot, points, reglages.coefficient_routier,
-                                        reglages.vitesse_moyenne_kmh)
+                                        reglages.vitesse_moyenne_kmh, arrivee=arrivee)
     if temps_service_s is None:
         temps_service_s, _ = estimer_temps_service_s(clients, reglages)
     return ProblemeTournees(

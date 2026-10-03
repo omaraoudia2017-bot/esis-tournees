@@ -12,9 +12,11 @@ from app.db.session import get_db
 from app.models import Client, Livraison, RemarqueClient, Tournee, Utilisateur, Vehicule, Zone
 from app.models.enums import RoleUtilisateur, StatutLivraison
 from app.optim.probleme import en_heure
-from app.schemas.tournee import (AnnulationPossible, ClientVue, DemandeAjoutClient, DemandeFin,
-                                 DemandeRemarque, LivraisonVue, Point, RemarqueVue, ReponseAjout,
-                                 ReponseAnnulation, ReponseOptimisation, TourneeVue)
+from app.schemas.tournee import (AnnulationPossible, ClientVue, DemandeAjoutClient, DemandeDomicile,
+                                 DemandeFin, DemandeRemarque, DomicileVue, LivraisonVue, Point,
+                                 RemarqueVue, ReponseAjout, ReponseAnnulation, ReponseOptimisation,
+                                 TourneeVue)
+from app.services import domicile as domicile_service
 from app.services import remarques as remarques_service
 from app.services import tournees as service
 from app.services.geocodage import Geocodeur
@@ -79,6 +81,11 @@ def vue_tournee(db: Session, t: Tournee, lecteur_id: int | None = None) -> Tourn
     zone = db.get(Zone, t.zone_id) if t.zone_id else None
     vehicule = db.get(Vehicule, t.vehicule_id) if t.vehicule_id else None
     depart_s, fin_s = service.bornes_horaires(t, reglages)
+    livreur = db.get(Utilisateur, t.livreur_id)
+    retour, colis = service.retour_prevu(db, t, livreur)
+    trajet = domicile_service.trajet_domicile_depot(livreur, reglages)
+    # Le domicile n'est montré qu'au livreur lui-même (le suivi administrateur ne l'affiche pas)
+    point_domicile = domicile_service.position_domicile(livreur) if lecteur_id == t.livreur_id else None
     return TourneeVue(
         id=t.id, date_tournee=t.date_tournee, statut=t.statut.value,
         zone=zone.nom if zone else None,
@@ -92,6 +99,11 @@ def vue_tournee(db: Session, t: Tournee, lecteur_id: int | None = None) -> Tourn
                     longitude=reglages.depot_longitude),
         livraisons=[vue_livraison(l, c, remarques[c.id_client], lecteur_id) for l, c in lignes],
         annulation_possible=annulation,
+        type_livreur=livreur.type_livreur.value if livreur and livreur.type_livreur else None,
+        retour=retour, colis_a_rapporter=colis,
+        domicile=Point(nom="Domicile", latitude=point_domicile.latitude, longitude=point_domicile.longitude)
+        if point_domicile else None,
+        trajet_domicile_depot_min=trajet[1] if trajet else None,
     )
 
 
@@ -232,3 +244,40 @@ def ajouter_client(demande: DemandeAjoutClient, request: Request,
         raise _http(e) from None
     return ReponseAjout(livraison=vue_livraison_seule(db, livraison, client, u.id),
                         avertissement=avertissement)
+
+
+# --------------------------------------------------------------------------- domicile (livreur interne)
+def _vue_domicile(u: Utilisateur, avertissement: str | None = None) -> DomicileVue:
+    trajet = domicile_service.trajet_domicile_depot(u, get_settings())
+    return DomicileVue(type_livreur=u.type_livreur.value if u.type_livreur else None,
+                       renseigne=bool(u.domicile_position), adresse=u.domicile_adresse,
+                       modifie_le=u.domicile_maj_le,
+                       trajet_depot_km=trajet[0] if trajet else None,
+                       trajet_depot_min=trajet[1] if trajet else None, avertissement=avertissement)
+
+
+@router.get("/moi/domicile", response_model=DomicileVue)
+def lire_domicile(u: Utilisateur = Depends(livreur_connecte)):
+    """Adresse de départ et de retour du livreur interne (lui seul y a accès)."""
+    return _vue_domicile(u)
+
+
+@router.put("/moi/domicile", response_model=DomicileVue)
+def enregistrer_domicile(demande: DemandeDomicile, request: Request,
+                         u: Utilisateur = Depends(livreur_connecte), db: Session = Depends(get_db),
+                         geo: Geocodeur = Depends(geocodeur)):
+    """Livreur interne uniquement. Adresse chiffrée, géocodée sans cache, jamais journalisée."""
+    try:
+        u, avertissement = domicile_service.enregistrer_domicile(
+            db, u, demande.voie, demande.code_postal, demande.ville, geo, contexte_depuis(request))
+    except domicile_service.ErreurDomicile as e:
+        raise HTTPException(e.statut, e.message) from None
+    return _vue_domicile(u, avertissement)
+
+
+@router.delete("/moi/domicile", response_model=DomicileVue)
+def supprimer_domicile(request: Request, u: Utilisateur = Depends(livreur_connecte),
+                       db: Session = Depends(get_db)):
+    """Le livreur retire son adresse : sa tournée part et revient alors au dépôt."""
+    domicile_service.supprimer_domicile(db, u, contexte_depuis(request))
+    return _vue_domicile(u)

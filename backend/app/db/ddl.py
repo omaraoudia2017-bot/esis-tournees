@@ -71,6 +71,15 @@ MIGRATIONS = [
     "ALTER TYPE precision_geocodage ADD VALUE IF NOT EXISTS 'manuelle'",           # Jour 12
     "ALTER TABLE utilisateurs ADD COLUMN IF NOT EXISTS conditions_version VARCHAR(10)",          # CGU
     "ALTER TABLE utilisateurs ADD COLUMN IF NOT EXISTS conditions_acceptees_le TIMESTAMPTZ",     # CGU
+    # Livreur interne / prestataire et adresse du domicile (chiffrée)
+    "DO $$ BEGIN CREATE TYPE type_livreur AS ENUM ('interne', 'prestataire'); "
+    "EXCEPTION WHEN duplicate_object THEN NULL; END $$",
+    "ALTER TABLE utilisateurs ADD COLUMN IF NOT EXISTS type_livreur type_livreur",
+    "ALTER TABLE utilisateurs ADD COLUMN IF NOT EXISTS domicile_adresse TEXT",
+    "ALTER TABLE utilisateurs ADD COLUMN IF NOT EXISTS domicile_position TEXT",
+    "ALTER TABLE utilisateurs ADD COLUMN IF NOT EXISTS domicile_maj_le TIMESTAMPTZ",
+    # Comptes existants : prestataire par défaut (départ et retour au dépôt, comme avant)
+    "UPDATE utilisateurs SET type_livreur = 'prestataire' WHERE role = 'livreur' AND type_livreur IS NULL",
 ]
 
 # Une instruction SQL par élément (exécutées une à une)

@@ -36,7 +36,8 @@ async def entetes_securite(request: Request, call_next):
     reponse.headers["X-Content-Type-Options"] = "nosniff"
     reponse.headers["X-Frame-Options"] = "DENY"
     reponse.headers["Referrer-Policy"] = "no-referrer"
-    if request.url.path.startswith(("/auth", "/tournees", "/livraisons", "/remarques", "/conditions", "/admin")):
+    if request.url.path.startswith(("/auth", "/moi", "/tournees", "/livraisons", "/remarques", "/conditions",
+                                     "/admin")):
         # jamais de jeton ni de donnée client (digicode, téléphone) dans un cache
         reponse.headers["Cache-Control"] = "no-store"
     return reponse

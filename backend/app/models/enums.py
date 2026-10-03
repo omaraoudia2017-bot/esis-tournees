@@ -9,6 +9,13 @@ class RoleUtilisateur(str, enum.Enum):
     ADMIN = "admin"
 
 
+class TypeLivreur(str, enum.Enum):
+    """Interne : rentre chez lui avec le camion (tournée domicile -> dépôt -> clients -> domicile).
+    Prestataire : rend le camion à l'entrepôt (départ et retour au dépôt)."""
+    INTERNE = "interne"
+    PRESTATAIRE = "prestataire"
+
+
 class TypeCamion(str, enum.Enum):
     NORMAL = "normal"   # colis standards
     HAYON = "hayon"     # palettes (clients professionnels)

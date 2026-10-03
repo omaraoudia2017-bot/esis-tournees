@@ -23,7 +23,7 @@ from sqlalchemy import delete, func, select
 from app.core.security import generer_mdp, hacher_mdp, valider_politique_mdp
 from app.db.session import SessionLocal
 from app.models import CodeSecours, Utilisateur, Vehicule
-from app.models.enums import RoleUtilisateur
+from app.models.enums import RoleUtilisateur, TypeLivreur
 from app.services.journal import journaliser
 
 
@@ -61,7 +61,8 @@ def creer(args) -> None:
         mdp = generer_mdp() if args.generer_mdp else demander_mdp()
         u = Utilisateur(identifiant=ident, nom=args.nom.upper(), prenom=args.prenom,
                         role=RoleUtilisateur(args.role), mot_de_passe_hash=hacher_mdp(mdp),
-                        vehicule_id=vehicule_id)
+                        vehicule_id=vehicule_id,
+                        type_livreur=TypeLivreur(args.type) if args.role == "livreur" else None)
         db.add(u)
         db.flush()
         journaliser(db, "ADMIN_CREATION_COMPTE", True, None, u.id, ident, role=args.role, source="cli")
@@ -80,7 +81,9 @@ def lister(_args) -> None:
         etat = "actif" if u.actif else "désactivé"
         if u.verrouille_jusqua:
             etat += f", verrouillé jusqu'à {u.verrouille_jusqua:%H:%M}"
-        print(f"- {u.identifiant:<20} {u.role.value:<8} 2FA={'oui' if u.totp_active else 'non':<3} {etat}")
+        type_l = u.type_livreur.value if u.type_livreur else "-"
+        print(f"- {u.identifiant:<20} {u.role.value:<8} {type_l:<12} "
+              f"2FA={'oui' if u.totp_active else 'non':<3} {etat}")
 
 
 def modifier(args, action: str) -> None:
@@ -117,6 +120,8 @@ if __name__ == "__main__":
     p.add_argument("--prenom", required=True)
     p.add_argument("--role", choices=[r.value for r in RoleUtilisateur], default="livreur")
     p.add_argument("--vehicule", help="immatriculation, ex. SIM-N01")
+    p.add_argument("--type", choices=[t.value for t in TypeLivreur], default="prestataire",
+                   help="livreur interne (rentre avec le camion) ou prestataire (rend le camion au dépôt)")
     p.add_argument("--generer-mdp", action="store_true", help="génère un mot de passe robuste")
     sous.add_parser("lister")
     for nom in ("deverrouiller", "reinitialiser-2fa", "desactiver"):

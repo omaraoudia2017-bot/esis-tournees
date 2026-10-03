@@ -214,12 +214,19 @@ def ecran_connecte() -> None:
                        f"{datetime.fromisoformat(profil['conditions_acceptees_le']).astimezone(FUSEAU):%d/%m/%Y}")
             if st.button("Relire les conditions et mes données", width="stretch"):
                 st.session_state.relire_conditions = True
+        if profil.get("type_livreur") == "interne":
+            st.caption("Livreur interne : vous rentrez avec le camion.")
+            if st.button("Mon adresse de départ et de retour", width="stretch"):
+                st.session_state.ecran_domicile = True
 
     if profil["role"] == "livreur" and profil.get("conditions_a_accepter"):
         ecran_conditions()
         return
     if st.session_state.get("relire_conditions"):
         ecran_conditions(lecture_seule=True)
+        return
+    if st.session_state.get("ecran_domicile") and profil.get("type_livreur") == "interne":
+        ecran_domicile()
         return
     if profil["role"] == "admin":
         espace_admin.ecran_admin(profil, SimpleNamespace(
@@ -233,7 +240,65 @@ def deconnecter(message: str) -> None:
     appel_api("POST", "/auth/deconnexion", st.session_state.jeton)
     reinitialiser(message)
     st.session_state.pop("relire_conditions", None)
+    st.session_state.pop("ecran_domicile", None)
     st.rerun()
+
+
+def ecran_domicile() -> None:
+    """Livreur interne : adresse de départ (avant le passage au dépôt) et de retour de la tournée."""
+    r = appel_api("GET", "/moi/domicile", st.session_state.jeton)
+    if r is None:
+        return
+    if r.status_code != 200:
+        afficher_erreur(r)
+        return
+    d = r.json()
+    st.title("Mon adresse de départ et de retour")
+    st.write("Vous rentrez chez vous avec le camion. Le matin, l'itinéraire part de votre domicile, "
+             "passe au dépôt pour le chargement puis va chez les clients. Le soir, il revient à votre "
+             "domicile, **sauf s'il vous reste des colis non livrés** (client absent, refus, client "
+             "reporté) : le retour se fait alors au dépôt pour les y déposer.")
+    st.caption("Votre adresse est chiffrée. Elle sert uniquement au calcul de votre itinéraire : le "
+               "planificateur voit seulement qu'elle est renseignée, jamais l'adresse elle-même.")
+    if message := st.session_state.pop("message_domicile", None):
+        getattr(st, message[0])(message[1])
+    if d["renseigne"]:
+        st.success(f"Adresse enregistrée : {d['adresse']}")
+        if d["trajet_depot_min"] is not None:
+            st.caption(f"Trajet estimé jusqu'au dépôt : {nombre_fr(d['trajet_depot_km'])} km, "
+                       f"environ {d['trajet_depot_min']} min.")
+    else:
+        st.warning("Aucune adresse enregistrée : votre tournée part et revient au dépôt.")
+
+    with st.form("domicile"):
+        voie = st.text_input("Numéro et rue", max_chars=200)
+        col1, col2 = st.columns([1, 2])
+        code_postal = col1.text_input("Code postal", max_chars=5)
+        ville = col2.text_input("Ville", max_chars=100)
+        valider = st.form_submit_button("Enregistrer mon adresse", type="primary", width="stretch")
+    if valider:
+        if not (voie.strip() and code_postal.strip() and ville.strip()):
+            st.error("Rue, code postal et ville sont obligatoires.")
+        else:
+            with st.spinner("Vérification de l'adresse..."):
+                r = appel_api("PUT", "/moi/domicile", st.session_state.jeton, timeout=30,
+                              json={"voie": voie, "code_postal": code_postal.strip(), "ville": ville})
+            if r is not None and r.status_code == 200:
+                avert = r.json().get("avertissement")
+                st.session_state.message_domicile = ("warning", avert) if avert else \
+                    ("success", "Adresse enregistrée : appuyez sur « Optimiser » pour en tenir compte.")
+                st.rerun()
+            elif r is not None:
+                afficher_erreur(r)
+    col1, col2 = st.columns(2)
+    if d["renseigne"] and col1.button("Supprimer mon adresse", width="stretch"):
+        r = appel_api("DELETE", "/moi/domicile", st.session_state.jeton)
+        if r is not None and r.status_code == 200:
+            st.session_state.message_domicile = ("success", "Adresse supprimée.")
+            st.rerun()
+    if col2.button("Retour à ma tournée", width="stretch"):
+        st.session_state.pop("ecran_domicile", None)
+        st.rerun()
 
 
 def ecran_conditions(lecture_seule: bool = False) -> None:
@@ -327,6 +392,25 @@ def action_tournee(chemin: str, message_ok: str | None = None, methode: str = "P
     st.rerun()
 
 
+def resume_depart_retour(t: dict) -> None:
+    """Livreur interne : départ de son domicile, passage au dépôt, retour au domicile ou au dépôt."""
+    colis = t.get("colis_a_rapporter", 0)
+    if t.get("type_livreur") != "interne":
+        if colis and t["statut"] == "terminee":
+            st.warning(f"{colis} colis non livré(s) à rapporter au dépôt.")
+        return
+    if not t.get("domicile"):
+        st.info("Vous rentrez avec le camion : renseignez votre adresse (menu de gauche, « Mon adresse "
+                "de départ et de retour ») pour que l'itinéraire parte et revienne chez vous.")
+        return
+    trajet = f" (≈ {t['trajet_domicile_depot_min']} min)" if t.get("trajet_domicile_depot_min") else ""
+    if t["retour"] == "domicile":
+        st.caption(f"Itinéraire : votre domicile → dépôt{trajet} → clients → retour à votre domicile.")
+    else:
+        st.warning(f"Retour au dépôt en fin de tournée : {colis} colis non livré(s) à y déposer "
+                   "(client absent, refus ou client à reporter).")
+
+
 def bandeau_annulation(annulation: dict | None) -> None:
     """« Terminer » cliqué par erreur : annulable quelques minutes (un démarrage, lui, s'annule
     directement sur la carte de la livraison en cours, avec « Annuler le démarrage »)."""
@@ -385,6 +469,8 @@ def optimiser() -> None:
                  f"{apres} km au lieu de {avant} km.")
     else:
         texte = f"Itinéraire optimisé en {duree} s : {apres} km au lieu de {avant} km dans l'ordre initial."
+    if res.get("retour") == "domicile":
+        texte += " Retour prévu à votre domicile."
     if res.get("temps_service") == "modele":
         texte += " Temps sur place estimés client par client par le modèle d'apprentissage."
     if res["nb_retards"]:
@@ -401,8 +487,16 @@ def carte_tournee(tournee: dict) -> None:
     depot = tournee["depot"]
     carte = folium.Map(location=[depot["latitude"], depot["longitude"]], zoom_start=12,
                        control_scale=True)
-    folium.Marker([depot["latitude"], depot["longitude"]], tooltip=f"Départ : {depot['nom']}",
+    folium.Marker([depot["latitude"], depot["longitude"]], tooltip=f"Dépôt : {depot['nom']}",
                   icon=folium.Icon(color="black", icon="home")).add_to(carte)
+    domicile = tournee.get("domicile")
+    if domicile:
+        point_domicile = (domicile["latitude"], domicile["longitude"])
+        folium.Marker(point_domicile, tooltip="Votre domicile",
+                      icon=folium.Icon(color="green", icon="user")).add_to(carte)
+        # Trajet du matin : domicile -> dépôt (chargement)
+        folium.PolyLine([point_domicile, (depot["latitude"], depot["longitude"])], weight=2,
+                        opacity=0.7, color="#16a34a", dash_array="4 6").add_to(carte)
     trace = [(depot["latitude"], depot["longitude"])]
     for rang, l in enumerate(tournee["livraisons"], start=1):
         c = l["client"]
@@ -420,10 +514,13 @@ def carte_tournee(tournee: dict) -> None:
             trace.append((c["latitude"], c["longitude"]))
     if len(trace) > 1:
         optimisee = tournee["optimisee_le"] is not None
-        folium.PolyLine(trace + [trace[0]], weight=3, opacity=0.8,
+        fin = (domicile["latitude"], domicile["longitude"]) \
+            if domicile and tournee.get("retour") == "domicile" else trace[0]
+        folium.PolyLine(trace + [fin], weight=3, opacity=0.8,
                         color="#2563eb" if optimisee else "#6b7280",
                         dash_array=None if optimisee else "6 8").add_to(carte)
-        lats, lons = [p[0] for p in trace], [p[1] for p in trace]
+        cadre = trace + ([(domicile["latitude"], domicile["longitude"])] if domicile else [])
+        lats, lons = [p[0] for p in cadre], [p[1] for p in cadre]
         carte.fit_bounds([[min(lats), min(lons)], [max(lats), max(lons)]], padding=(20, 20))
     st_folium(carte, height=380, use_container_width=True, returned_objects=[], key="carte_tournee")
     st.caption("Tracé à vol d'oiseau entre les arrêts. Pointillés gris : ordre initial ; "
@@ -573,6 +670,7 @@ def ecran_tournee(profil: dict) -> None:
     if message := st.session_state.pop("message_tournee", None):
         getattr(st, message[0])(message[1])
     bandeau_annulation(t.get("annulation_possible"))
+    resume_depart_retour(t)
 
     faites = sum(l["statut"] in ("livre", "absent", "refuse") for l in livraisons)
     a_faire = [l for l in livraisons if l["statut"] in ("a_livrer", "en_cours")]

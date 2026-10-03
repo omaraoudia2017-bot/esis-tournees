@@ -49,6 +49,8 @@ class ProfilUtilisateur(BaseModel):
     derniere_connexion: datetime | None
     # Livreur : tant que la version en vigueur des conditions n'est pas acceptée, seules les routes
     # /auth et /conditions répondent (les autres renvoient 403)
+    type_livreur: str | None = None            # "interne" / "prestataire" (livreur uniquement)
+    domicile_renseigne: bool = False
     conditions_a_accepter: bool = False
     conditions_version: str | None = None
     conditions_acceptees_le: datetime | None = None
