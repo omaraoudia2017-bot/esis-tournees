@@ -57,6 +57,15 @@ def utilisateur_en_preauth(charge: dict = Depends(charge_preauth),
         raise NON_AUTHENTIFIE from None
 
 
+def utilisateur_en_activation(charge: dict = Depends(charge_preauth),
+                              db: Session = Depends(get_db)) -> Utilisateur:
+    """Jeton obtenu avec un code d'activation : ne sert qu'à choisir son mot de passe."""
+    try:
+        return utilisateur_preauth(db, charge, activation=True)
+    except ErreurAuth:
+        raise NON_AUTHENTIFIE from None
+
+
 def charge_acces(creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
                  db: Session = Depends(get_db)) -> dict:
     if creds is None:

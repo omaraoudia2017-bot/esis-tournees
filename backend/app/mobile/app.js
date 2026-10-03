@@ -196,7 +196,7 @@ async function action(methode, chemin, corps, messageOk, recharger = chargerTour
 function rendre() {
   const app = document.getElementById("app");
   const ecrans = { connexion: ecranConnexion, verification: ecranVerification, enrolement: ecranEnrolement,
-    codes: ecranCodes, conditions: ecranConditions, tournee: ecranTournee, menu: ecranMenu, domicile: ecranDomicile,
+    codes: ecranCodes, nouveauMdp: ecranNouveauMdp, conditions: ecranConditions, tournee: ecranTournee, menu: ecranMenu, domicile: ecranDomicile,
     trajets: ecranTrajets };
   const defile = app.querySelector(".defilement, .page");
   const position = defile ? defile.scrollTop : 0;
@@ -230,7 +230,7 @@ function ecranConnexion() {
     if (r.status !== 200) { erreur.replaceChildren(boiteMessage({ type: "erreur", texte: r.detail })); return; }
     etat.preauth = r.data.jeton_preauth;
     etat.messageConnexion = null;
-    etat.ecran = r.data.etape === "enrolement" ? "enrolement" : "verification";
+    etat.ecran = { enrolement: "enrolement", nouveau_mot_de_passe: "nouveauMdp" }[r.data.etape] || "verification";
     rendre();
   };
   return h("form", { classe: "centre", onsubmit: valider, autocomplete: "on" },
@@ -242,6 +242,7 @@ function ecranConnexion() {
     erreur,
     h("label", { classe: "champ", for: "identifiant" }, "Identifiant", identifiant),
     h("label", { classe: "champ", for: "mdp" }, "Mot de passe", mdp),
+    h("p", { classe: "petit", style: { marginTop: "-14px" }, texte: "Première connexion : saisissez le code d'activation remis par votre planificateur (XXXX-XXXX). Vous choisirez ensuite votre mot de passe." }),
     h("button", { type: "submit", classe: "btn btn-principal", texte: "Se connecter" }),
     h("p", { classe: "petit", texte: "Après 5 erreurs, le compte est bloqué 15 minutes. Session limitée à 30 minutes." }));
 }
@@ -249,6 +250,64 @@ function ecranConnexion() {
 function boutonRetourConnexion() {
   return h("button", { type: "button", classe: "btn", texte: "Annuler et revenir à la connexion",
     onclick: () => deconnexionLocale(null) });
+}
+
+// ---------------- première connexion : choix du mot de passe
+const REGLES_MDP = [
+  ["Au moins 12 caractères", (m) => m.length >= 12],
+  ["Des minuscules et des majuscules", (m) => /[a-zà-ÿ]/.test(m) && /[A-ZÀ-Ý]/.test(m)],
+  ["Au moins un chiffre", (m) => /[0-9]/.test(m)],
+];
+
+function ecranNouveauMdp() {
+  const nouveau = h("input", { type: "password", id: "nouveau-mdp", autocomplete: "new-password", maxlength: 72 });
+  const confirmation = h("input", { type: "password", id: "confirmation-mdp", autocomplete: "new-password", maxlength: 72 });
+  const afficher = h("input", { type: "checkbox", id: "afficher-mdp" });
+  afficher.addEventListener("change", () => { nouveau.type = confirmation.type = afficher.checked ? "text" : "password"; });
+  const regles = REGLES_MDP.map(([libelle]) => h("li", { texte: "○ " + libelle }));
+  const identiques = h("li", { texte: "○ Les deux saisies sont identiques" });
+  const majRegles = () => {
+    REGLES_MDP.forEach(([libelle, test], k) => {
+      const ok = test(nouveau.value);
+      regles[k].textContent = (ok ? "✓ " : "○ ") + libelle;
+      regles[k].className = ok ? "regle-ok" : "";
+    });
+    const ok = nouveau.value !== "" && nouveau.value === confirmation.value;
+    identiques.textContent = (ok ? "✓ " : "○ ") + "Les deux saisies sont identiques";
+    identiques.className = ok ? "regle-ok" : "";
+  };
+  nouveau.addEventListener("input", majRegles);
+  confirmation.addEventListener("input", majRegles);
+  const erreur = h("div");
+  const valider = async (e) => {
+    e.preventDefault();
+    if (!nouveau.value || nouveau.value !== confirmation.value) {
+      erreur.replaceChildren(boiteMessage({ type: "erreur", texte: "Les deux mots de passe ne sont pas identiques." }));
+      return;
+    }
+    const r = await api("POST", "/auth/mot-de-passe-initial", { nouveau: nouveau.value, confirmation: confirmation.value }, etat.preauth);
+    if (r.status === 200) {
+      nouveau.value = confirmation.value = "";
+      etat.preauth = r.data.jeton_preauth;
+      etat.ecran = r.data.etape === "enrolement" ? "enrolement" : "verification";
+      rendre();
+      return;
+    }
+    if (r.status === 401) { deconnexionLocale("Délai dépassé : reconnectez-vous avec votre code d'activation."); return; }
+    erreur.replaceChildren(boiteMessage({ type: "erreur", texte: r.detail }));
+  };
+  setTimeout(() => nouveau.focus(), 50);
+  return h("form", { classe: "page", onsubmit: valider },
+    h("h1", { classe: "moyen", texte: "Choisissez votre mot de passe" }),
+    h("p", { classe: "texte", texte: "Première connexion : ce mot de passe remplace le code d'activation. Vous seul le connaîtrez, le planificateur n'y a pas accès." }),
+    erreur,
+    h("label", { classe: "champ", for: "nouveau-mdp" }, "Nouveau mot de passe", nouveau),
+    h("label", { classe: "champ", for: "confirmation-mdp" }, "Confirmez le mot de passe", confirmation),
+    h("label", { classe: "case", for: "afficher-mdp" }, afficher, "Afficher les mots de passe"),
+    h("ul", { classe: "regles" }, regles, identiques, h("li", { texte: "Sans votre identifiant" })),
+    h("button", { type: "submit", classe: "btn btn-principal", texte: "Enregistrer et continuer" }),
+    h("p", { classe: "petit", texte: "Étape suivante : activation de la double authentification avec un QR code." }),
+    boutonRetourConnexion());
 }
 
 // ---------------- 2FA

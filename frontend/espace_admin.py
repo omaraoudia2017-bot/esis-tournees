@@ -5,7 +5,7 @@ Appelé par app.py, qui fournit les outils communs (appel à l'API, session, car
 Toutes les règles (droits, refus, journal) sont appliquées par l'API : cet écran ne fait qu'afficher.
 """
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 import folium
 import pandas as pd
@@ -301,14 +301,39 @@ def onglet_import() -> None:
 
 
 # --------------------------------------------------------------------------- livreurs
+def retenir_code(identifiant: str, res: dict) -> None:
+    """Le code reste affiché jusqu'à ce que le planificateur confirme l'avoir remis."""
+    if res.get("code_activation"):
+        st.session_state.code_a_transmettre = (identifiant, res["code_activation"], res["code_expire_le"])
+
+
+def encadre_code() -> None:
+    identifiant, code, expire = st.session_state.code_a_transmettre
+    with st.container(border=True):
+        st.markdown(f"#### Code d'activation de **{identifiant}**")
+        st.code(code, language=None)
+        st.write(f"Valable jusqu'au **{date_heure(expire)}**, utilisable une seule fois. À remettre au salarié "
+                 "par un canal sûr : en main propre ou par téléphone, jamais par e-mail.")
+        st.caption("Première connexion (application livreur ou interface web) : identifiant + ce code, puis "
+                   "choix de son mot de passe (saisi deux fois), puis activation de la double authentification "
+                   "par QR code, puis lecture des conditions d'utilisation. Vous ne connaîtrez jamais son mot de "
+                   "passe. Ce code ne sera plus affiché : en cas de perte, « Réinitialiser le mot de passe » en "
+                   "génère un nouveau.")
+        if st.button("J'ai remis le code au salarié", type="primary"):
+            del st.session_state["code_a_transmettre"]
+            st.rerun()
+
+
+def etat_activation(c: dict) -> str:
+    if not c["activation_en_attente"]:
+        return "faite" if c["derniere_connexion"] or c["totp_active"] else "—"
+    expire = datetime.fromisoformat(c["activation_expire_le"])
+    return "code expiré" if expire <= datetime.now(timezone.utc) else f"en attente (→ {date_heure(c['activation_expire_le'])})"
+
+
 def onglet_livreurs() -> None:
-    if secret := st.session_state.pop("mdp_a_transmettre", None):
-        identifiant, mdp = secret
-        st.warning(f"Mot de passe temporaire de **{identifiant}**, affiché une seule fois : à transmettre "
-                   "au salarié par un canal sûr (en main propre, pas par e-mail). À la première "
-                   "connexion, il activera la double authentification puis devra lire et accepter les "
-                   "conditions d'utilisation et l'information sur ses données personnelles.")
-        st.code(mdp, language=None)
+    if st.session_state.get("code_a_transmettre"):
+        encadre_code()
     comptes = api("GET", "/admin/utilisateurs") or []
     vehicules = api("GET", "/admin/vehicules") or []
     st.dataframe(pd.DataFrame([{
@@ -316,7 +341,8 @@ def onglet_livreurs() -> None:
         "Type": c["type_livreur"] or "—",
         "Domicile": ("renseigné" if c["domicile_renseigne"] else "à renseigner par le livreur")
         if c["type_livreur"] == "interne" else "—",
-        "Actif": c["actif"], "2FA": c["totp_active"], "Verrouillé": c["verrouille"],
+        "Actif": c["actif"], "Activation": etat_activation(c), "2FA": c["totp_active"],
+        "Verrouillé": c["verrouille"],
         "Camion": f"{c['vehicule']} ({c['type_camion']})" if c["vehicule"] else "—",
         "Dernière connexion": date_heure(c["derniere_connexion"]),
         "Conditions": (f"v{c['conditions_version']} le {date_fr(c['conditions_acceptees_le'])}"
@@ -349,8 +375,7 @@ def onglet_livreurs() -> None:
                     "vehicule_id": vehicule["id"] if vehicule and role == "livreur" else None,
                     "type_livreur": TYPES_LIVREUR[type_livreur] if role == "livreur" else None})
             if res:
-                st.session_state.mdp_a_transmettre = (res["compte"]["identifiant"],
-                                                      res["mot_de_passe_temporaire"])
+                retenir_code(res["compte"]["identifiant"], res)
                 st.rerun()
 
     with col2:
@@ -365,8 +390,7 @@ def gerer_compte(c: dict, vehicules: list[dict]) -> None:
     def action(nom: str, message: str):
         res = api("POST", f"/admin/utilisateurs/{c['id']}/{nom}")
         if res:
-            if res["mot_de_passe_temporaire"]:
-                st.session_state.mdp_a_transmettre = (c["identifiant"], res["mot_de_passe_temporaire"])
+            retenir_code(c["identifiant"], res)
             annoncer("success", message)
 
     if c["verrouille"] and st.button("Déverrouiller", width="stretch"):
@@ -378,7 +402,8 @@ def gerer_compte(c: dict, vehicules: list[dict]) -> None:
     elif st.button("Réactiver le compte", width="stretch"):
         action("reactiver", f"{c['identifiant']} réactivé.")
     if st.button("Réinitialiser le mot de passe", disabled=not confirme, width="stretch"):
-        action("reinitialiser-mdp", f"Mot de passe de {c['identifiant']} réinitialisé.")
+        action("reinitialiser-mdp", f"Mot de passe de {c['identifiant']} réinitialisé : remettez-lui le "
+                                    "nouveau code d'activation affiché en haut de la page.")
     if st.button("Réinitialiser la double authentification (téléphone perdu)", disabled=not confirme,
                  width="stretch"):
         action("reinitialiser-2fa", f"2FA de {c['identifiant']} réinitialisée : nouveau QR code à la "

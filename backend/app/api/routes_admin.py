@@ -56,7 +56,9 @@ def _compte(u: Utilisateur, v: Vehicule | None) -> CompteVue:
                      conditions_version=u.conditions_version,
                      conditions_acceptees_le=u.conditions_acceptees_le,
                      type_livreur=u.type_livreur.value if u.type_livreur else None,
-                     domicile_renseigne=bool(u.domicile_position))
+                     domicile_renseigne=bool(u.domicile_position),
+                     activation_en_attente=u.mdp_a_definir,
+                     activation_expire_le=u.activation_expire_le if u.mdp_a_definir else None)
 
 
 def _compte_de(db: Session, u: Utilisateur) -> CompteVue:
@@ -86,14 +88,15 @@ def lister_comptes(db: Session = Depends(get_db)):
 
 @router.post("/utilisateurs", response_model=ReponseCompte, status_code=201)
 def creer_compte(demande: DemandeCompte, a: service.Acteur = Depends(acteur), db: Session = Depends(get_db)):
-    """Le mot de passe initial est généré et renvoyé UNE fois ; la 2FA est imposée à la 1re connexion."""
+    """Un code d'activation est généré et renvoyé UNE fois : à la 1re connexion, le salarié choisit
+    son mot de passe puis active la 2FA."""
     try:
-        u, mdp = service.creer_compte(db, a, demande.identifiant, demande.nom, demande.prenom,
+        u, code = service.creer_compte(db, a, demande.identifiant, demande.nom, demande.prenom,
                                       RoleUtilisateur(demande.role), demande.vehicule_id,
                                       demande.type_livreur)
     except service.ErreurAdmin as e:
         raise _http(e) from None
-    return ReponseCompte(compte=_compte_de(db, u), mot_de_passe_temporaire=mdp)
+    return ReponseCompte(compte=_compte_de(db, u), code_activation=code, code_expire_le=u.activation_expire_le)
 
 
 @router.post("/utilisateurs/{utilisateur_id}/vehicule", response_model=CompteVue)
@@ -119,13 +122,14 @@ def changer_type_livreur(utilisateur_id: int, demande: DemandeTypeLivreur,
 def agir_sur_compte(utilisateur_id: int,
                     action: str = Path(pattern="^(" + "|".join(service.ACTIONS_COMPTE) + ")$"),
                     a: service.Acteur = Depends(acteur), db: Session = Depends(get_db)):
-    """desactiver, reactiver, deverrouiller, reinitialiser-mdp (nouveau mot de passe renvoyé une
+    """desactiver, reactiver, deverrouiller, reinitialiser-mdp (nouveau code d'activation renvoyé une
     fois), reinitialiser-2fa (nouvel enrôlement à la prochaine connexion)."""
     try:
-        u, mdp = service.agir_sur_compte(db, a, utilisateur_id, action)
+        u, code = service.agir_sur_compte(db, a, utilisateur_id, action)
     except service.ErreurAdmin as e:
         raise _http(e) from None
-    return ReponseCompte(compte=_compte_de(db, u), mot_de_passe_temporaire=mdp)
+    return ReponseCompte(compte=_compte_de(db, u), code_activation=code,
+                         code_expire_le=u.activation_expire_le if code else None)
 
 
 @router.get("/vehicules", response_model=list[VehiculeVue])

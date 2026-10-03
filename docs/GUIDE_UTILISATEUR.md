@@ -7,12 +7,15 @@ informatique.
 ## 1. Se connecter (tous les utilisateurs)
 
 **Première connexion**
-1. Saisir l'identifiant et le mot de passe temporaire remis en main propre par le planificateur.
-2. Installer sur son téléphone une application d'authentification (Google Authenticator ou
+1. Saisir l'identifiant et, dans le champ « Mot de passe », le **code d'activation** (XXXX-XXXX)
+   remis en main propre par le planificateur. Il est valable 72 heures et ne sert qu'une fois.
+2. Choisir son mot de passe et le saisir une seconde fois pour confirmation : au moins 12 caractères,
+   minuscules, majuscules et chiffre, sans son identifiant. Personne d'autre ne le connaît.
+3. Installer sur son téléphone une application d'authentification (Google Authenticator ou
    Microsoft Authenticator), puis scanner le QR code affiché. Si le scan est impossible, saisir la
    clé indiquée sous « Impossible de scanner ? ».
-3. Saisir le code à 6 chiffres affiché par l'application.
-4. Noter les **10 codes de secours** sur papier ou dans un gestionnaire de mots de passe, hors du
+4. Saisir le code à 6 chiffres affiché par l'application.
+5. Noter les **10 codes de secours** sur papier ou dans un gestionnaire de mots de passe, hors du
    téléphone : ils ne seront plus jamais affichés. Chacun remplace une fois le code de l'application
    si le téléphone est perdu.
 
@@ -24,7 +27,8 @@ informatique.
 - Après **5 erreurs** de mot de passe, le compte est bloqué 15 minutes (ou débloqué par le planificateur).
 - Un code à 6 chiffres ne sert qu'une fois : en cas de refus, attendre le code suivant (30 secondes).
 - Téléphone perdu : se connecter avec un code de secours, puis prévenir le planificateur.
-- Mot de passe oublié : le planificateur le réinitialise et remet un nouveau mot de passe temporaire.
+- Mot de passe oublié : le planificateur le réinitialise et remet un nouveau code d'activation ;
+  on choisit alors un nouveau mot de passe (la double authentification déjà activée est conservée).
 
 ## 2. Livreur : ma tournée du jour
 
@@ -84,9 +88,10 @@ leur motif. Les nouvelles adresses sont localisées automatiquement (environ une
 bouton « Géocoder les adresses en attente » traite le reste par lots.
 
 **Livreurs**
-- Créer un compte : le **mot de passe temporaire n'est affiché qu'une fois** ; le remettre en main
-  propre (jamais par e-mail ni en capture d'écran). La double authentification sera demandée à la
-  première connexion.
+- Créer un compte : un **code d'activation** est affiché dans un encadré jusqu'au clic sur « J'ai remis
+  le code au salarié » ; le remettre en main propre ou par téléphone (jamais par e-mail ni en capture
+  d'écran). Valable 72 heures, à usage unique. Le salarié choisit ensuite lui-même son mot de passe,
+  puis active la double authentification. La colonne « Activation » indique si le code a été utilisé.
 - Gérer un compte (cocher la confirmation pour les actions sensibles) : désactiver (effet immédiat,
   sessions coupées), réactiver, déverrouiller, réinitialiser le mot de passe, réinitialiser la double
   authentification (téléphone perdu), affecter un camion.
@@ -110,5 +115,5 @@ consultations des digicodes, exports et anonymisations). Le journal ne peut êtr
 
 - Ne jamais communiquer son mot de passe ni ses codes de secours, y compris au planificateur.
 - Se déconnecter sur un appareil partagé.
-- Ne pas faire de capture d'écran d'un digicode, d'un mot de passe temporaire ou d'une fiche client.
+- Ne pas faire de capture d'écran d'un digicode, d'un code d'activation ou d'une fiche client.
 - Signaler au planificateur toute alerte de connexion que l'on ne reconnaît pas.

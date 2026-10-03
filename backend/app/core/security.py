@@ -133,6 +133,20 @@ def hacher_code_secours(code: str) -> str:
     return hmac.new(cle, normaliser_code_secours(code).encode("ascii"), hashlib.sha256).hexdigest()
 
 
+# --------------------------------------------------------------------------- codes d'activation
+def generer_code_activation() -> str:
+    """Code remis par le planificateur à la création du compte (ou après réinitialisation du mot de
+    passe) : format XXXX-XXXX, ~40 bits d'entropie, usage unique, durée limitée, et protégé par le
+    verrouillage après 5 échecs. Stocké haché (bcrypt) comme un mot de passe."""
+    brut = "".join(secrets.choice(ALPHABET_SECOURS) for _ in range(8))
+    return f"{brut[:4]}-{brut[4:]}"
+
+
+def normaliser_code_activation(code: str) -> str:
+    """Majuscules, sans tiret ni espace : « k7m2 q9xa » = « K7M2-Q9XA »."""
+    return normaliser_code_secours(code)[:16]
+
+
 def generer_mdp(longueur: int = 16) -> str:
     """Mot de passe aléatoire conforme à la politique (création de compte, réinitialisation)."""
     alphabet = string.ascii_letters + string.digits + "-_!?*"

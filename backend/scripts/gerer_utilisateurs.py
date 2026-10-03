@@ -100,6 +100,7 @@ def modifier(args, action: str) -> None:
         elif action == "reinitialiser-mdp":       # mot de passe oublié (y compris d'un administrateur)
             mdp = generer_mdp() if args.generer_mdp else demander_mdp()
             u.mot_de_passe_hash = hacher_mdp(mdp)
+            u.mdp_a_definir, u.activation_expire_le = False, None    # mot de passe définitif
             u.verrouille_jusqua, u.tentatives_echec = None, 0
             u.sessions_invalidees_le = datetime.now(timezone.utc)   # anciennes sessions coupées
             if args.generer_mdp:

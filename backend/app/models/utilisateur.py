@@ -22,6 +22,11 @@ class Utilisateur(Base):
 
     # Authentification : hash bcrypt uniquement, jamais le mot de passe en clair
     mot_de_passe_hash: Mapped[str] = mapped_column(String(255))
+    # Compte créé ou mot de passe réinitialisé par le planificateur : le hash ci-dessus est celui
+    # d'un CODE D'ACTIVATION à usage unique (valable jusqu'à activation_expire_le). À la connexion
+    # avec ce code, l'utilisateur doit choisir son mot de passe avant toute autre étape.
+    mdp_a_definir: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    activation_expire_le: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # 2FA TOTP : secret chiffré Fernet, activé après le premier scan du QR code
     totp_secret: Mapped[str | None] = mapped_column(EncryptedText)
     totp_active: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")

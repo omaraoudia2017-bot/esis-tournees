@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     # Authentification (cahier des charges v6, module 1)
     preauth_expire_minutes: int = 5        # délai pour saisir le code 2FA après le mot de passe
     max_echecs_connexion: int = 5          # verrouillage après 5 échecs
+    activation_validite_heures: int = 72   # durée de validité du code d'activation d'un compte
     verrouillage_minutes: int = 15
     limite_requetes_auth_par_minute: int = 10
     totp_emetteur: str = "Road Optim"     # nom affiché dans l'application d'authentification (nouveaux enrôlements)

@@ -99,8 +99,12 @@ def ecran_identifiants() -> None:
         st.info(msg)
     with st.form("connexion"):
         identifiant = st.text_input("Identifiant", autocomplete="username")
-        mdp = st.text_input("Mot de passe", type="password", autocomplete="current-password")
+        mdp = st.text_input("Mot de passe", type="password", autocomplete="current-password",
+                            help="Première connexion : saisissez le code d'activation remis par votre "
+                                 "planificateur (format XXXX-XXXX).")
         valider = st.form_submit_button("Se connecter", width="stretch")
+    st.caption("Première connexion ? Saisissez votre identifiant et le code d'activation remis par votre "
+               "planificateur : vous choisirez ensuite votre mot de passe.")
     if valider:
         if not identifiant.strip() or not mdp:
             st.error("Veuillez renseigner l'identifiant et le mot de passe.")
@@ -114,6 +118,38 @@ def ecran_identifiants() -> None:
         st.session_state.preauth = r.json()["jeton_preauth"]
         st.session_state.etape = r.json()["etape"]
         st.rerun()
+
+
+def ecran_nouveau_mdp() -> None:
+    """Première connexion (code d'activation accepté) : choix du mot de passe, saisi deux fois."""
+    st.image(LOGO_LONG, width=300)
+    st.subheader("Choisissez votre mot de passe")
+    st.write("Ce mot de passe remplace le code d'activation. Vous seul le connaîtrez : "
+             "le planificateur n'y a pas accès.")
+    st.caption("Au moins 12 caractères, avec des minuscules, des majuscules et au moins un chiffre, "
+               "sans votre identifiant.")
+    with st.form("nouveau_mdp"):
+        nouveau = st.text_input("Nouveau mot de passe", type="password", autocomplete="new-password")
+        confirmation = st.text_input("Confirmez le mot de passe", type="password", autocomplete="new-password")
+        valider = st.form_submit_button("Enregistrer et continuer", width="stretch")
+    if valider:
+        if not nouveau or nouveau != confirmation:
+            st.error("Les deux mots de passe ne sont pas identiques.")
+            return
+        r = appel_api("POST", "/auth/mot-de-passe-initial", st.session_state.preauth,
+                      json={"nouveau": nouveau, "confirmation": confirmation})
+        if r is None:
+            return
+        if r.status_code == 401:
+            reinitialiser("Délai dépassé : reconnectez-vous avec votre code d'activation.")
+            st.rerun()
+        if r.status_code != 200:
+            afficher_erreur(r)
+            return
+        st.session_state.preauth = r.json()["jeton_preauth"]
+        st.session_state.etape = r.json()["etape"]
+        st.rerun()
+    bouton_annuler()
 
 
 def bouton_annuler() -> None:
@@ -732,6 +768,7 @@ def ecran_tournee(profil: dict) -> None:
 
 ECRANS = {
     "identifiants": ecran_identifiants,
+    "nouveau_mot_de_passe": ecran_nouveau_mdp,
     "enrolement": ecran_enrolement,
     "codes_secours": ecran_codes_secours,
     "verification": ecran_verification,

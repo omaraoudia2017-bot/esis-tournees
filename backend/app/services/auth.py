@@ -12,14 +12,17 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.security import (HACHAGE_FACTICE, TYPE_ACCES, TYPE_PREAUTH, creer_jeton,
-                               generer_codes_secours, hacher_code_secours, nouveau_secret_totp,
-                               uri_totp, verifier_mdp, verifier_totp)
+                               generer_codes_secours, hacher_code_secours, hacher_mdp,
+                               normaliser_code_activation, nouveau_secret_totp, uri_totp,
+                               valider_politique_mdp, verifier_mdp, verifier_totp)
 from app.models import CodeSecours, JetonRevoque, Utilisateur
 from app.services.anomalies import analyser_connexion
 from app.services.journal import ContexteRequete, journaliser
 
 MESSAGE_IDENTIFIANTS = "Identifiant ou mot de passe incorrect."
 MESSAGE_CODE = "Code de vérification incorrect ou expiré."
+MESSAGE_ACTIVATION_EXPIREE = ("Code d'activation expiré : demandez un nouveau code à votre planificateur "
+                              "(« Réinitialiser le mot de passe »).")
 
 
 class ErreurAuth(Exception):
@@ -69,25 +72,73 @@ def etape_mot_de_passe(db: Session, identifiant: str, mdp: str,
         db.commit()
         raise ErreurAuth(MESSAGE_IDENTIFIANTS)
 
+    if u.mdp_a_definir:
+        return _etape_code_activation(db, u, mdp, ctx)
+
     if not verifier_mdp(mdp, u.mot_de_passe_hash):
         _enregistrer_echec(db, u, "mot_de_passe", ctx)
         raise ErreurAuth(MESSAGE_IDENTIFIANTS)
 
     journaliser(db, "MOT_DE_PASSE_VALIDE", True, ctx, u.id, u.identifiant)
     db.commit()
+    return u, _jeton_preauth(u), ("verification" if u.totp_active else "enrolement")
+
+
+def _jeton_preauth(u: Utilisateur) -> str:
     jeton, _, _ = creer_jeton(u.id, u.role.value, TYPE_PREAUTH,
                               timedelta(minutes=get_settings().preauth_expire_minutes))
-    return u, jeton, ("verification" if u.totp_active else "enrolement")
+    return jeton
 
 
-def utilisateur_preauth(db: Session, charge: dict) -> Utilisateur:
-    """Utilisateur d'un jeton de pré-authentification encore valable (non utilisé, non verrouillé)."""
+def _etape_code_activation(db: Session, u: Utilisateur, code: str,
+                           ctx: ContexteRequete) -> tuple[Utilisateur, str, str]:
+    """Nouveau compte (ou mot de passe réinitialisé) : le « mot de passe » saisi est le code
+    d'activation remis par le planificateur. Mêmes protections qu'un mot de passe (message
+    générique, compteur d'échecs, verrouillage) ; l'étape suivante est le choix du mot de passe."""
+    if not verifier_mdp(normaliser_code_activation(code), u.mot_de_passe_hash):
+        _enregistrer_echec(db, u, "code_activation", ctx)
+        raise ErreurAuth(MESSAGE_IDENTIFIANTS)
+    if u.activation_expire_le is None or u.activation_expire_le <= _maintenant():
+        # Message précis seulement quand le code est juste : il ne révèle rien à un attaquant
+        journaliser(db, "CONNEXION_ECHEC", False, ctx, u.id, u.identifiant, motif="code_activation_expire")
+        db.commit()
+        raise ErreurAuth(MESSAGE_ACTIVATION_EXPIREE)
+    journaliser(db, "CODE_ACTIVATION_VALIDE", True, ctx, u.id, u.identifiant)
+    db.commit()
+    return u, _jeton_preauth(u), "nouveau_mot_de_passe"
+
+
+def utilisateur_preauth(db: Session, charge: dict, activation: bool = False) -> Utilisateur:
+    """Utilisateur d'un jeton de pré-authentification encore valable (non utilisé, non verrouillé).
+    `activation` : jeton obtenu avec un code d'activation, qui ne sert QU'À choisir le mot de passe
+    (impossible de passer à la 2FA tant que le mot de passe n'est pas défini, et inversement)."""
     if db.get(JetonRevoque, charge["jti"]) is not None:
         raise ErreurAuth(MESSAGE_CODE)
     u = db.get(Utilisateur, int(charge["sub"]))
-    if u is None or not u.actif or est_verrouille(u):
+    if u is None or not u.actif or est_verrouille(u) or u.mdp_a_definir != activation:
         raise ErreurAuth(MESSAGE_CODE)
     return u
+
+
+def definir_mot_de_passe(db: Session, u: Utilisateur, nouveau: str, confirmation: str, charge: dict,
+                         ctx: ContexteRequete) -> tuple[str, str]:
+    """Choix du mot de passe à la première connexion. Retourne (nouveau jeton de
+    pré-authentification, étape suivante : enrôlement 2FA ou vérification si déjà activée)."""
+    if nouveau != confirmation:
+        raise ErreurAuth("Les deux mots de passe ne sont pas identiques.", 422)
+    erreurs = valider_politique_mdp(nouveau)
+    if u.identifiant.lower() in nouveau.lower():
+        erreurs.append("ne pas contenir votre identifiant")
+    if erreurs:
+        raise ErreurAuth("Mot de passe refusé. Règles à respecter : " + ", ".join(erreurs) + ".", 422)
+    u.mot_de_passe_hash = hacher_mdp(nouveau)
+    u.mdp_a_definir, u.activation_expire_le = False, None       # le code ne sert plus
+    u.tentatives_echec = 0
+    # Le jeton qui a servi est à usage unique
+    db.add(JetonRevoque(jti=charge["jti"], expire_le=datetime.fromtimestamp(charge["exp"], tz=timezone.utc)))
+    journaliser(db, "MOT_DE_PASSE_DEFINI", True, ctx, u.id, u.identifiant)
+    db.commit()
+    return _jeton_preauth(u), ("verification" if u.totp_active else "enrolement")
 
 
 # --------------------------------------------------------------------------- étape 2

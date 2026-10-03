@@ -80,6 +80,9 @@ MIGRATIONS = [
     "ALTER TABLE utilisateurs ADD COLUMN IF NOT EXISTS domicile_maj_le TIMESTAMPTZ",
     # Comptes existants : prestataire par défaut (départ et retour au dépôt, comme avant)
     "UPDATE utilisateurs SET type_livreur = 'prestataire' WHERE role = 'livreur' AND type_livreur IS NULL",
+    # Activation du compte : code à usage unique, mot de passe choisi par l'utilisateur
+    "ALTER TABLE utilisateurs ADD COLUMN IF NOT EXISTS mdp_a_definir BOOLEAN NOT NULL DEFAULT false",
+    "ALTER TABLE utilisateurs ADD COLUMN IF NOT EXISTS activation_expire_le TIMESTAMPTZ",
 ]
 
 # Une instruction SQL par élément (exécutées une à une)

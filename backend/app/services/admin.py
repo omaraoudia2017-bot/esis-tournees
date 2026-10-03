@@ -20,8 +20,8 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.core.config import Settings
-from app.core.security import generer_mdp, hacher_mdp
+from app.core.config import Settings, get_settings
+from app.core.security import generer_code_activation, hacher_mdp, normaliser_code_activation
 from app.models import (CacheGeocodage, Client, CodeSecours, JournalSecurite, Livraison, Tournee,
                         Utilisateur, Vehicule, Zone)
 from app.models.enums import (PrecisionGeocodage, RoleUtilisateur, SourceClient, StatutLivraison,
@@ -87,33 +87,44 @@ def _vehicule_valide(db: Session, vehicule_id: int | None) -> Vehicule | None:
 def creer_compte(db: Session, acteur: Acteur, identifiant: str, nom: str, prenom: str,
                  role: RoleUtilisateur, vehicule_id: int | None,
                  type_livreur: str | None = None) -> tuple[Utilisateur, str]:
-    """Retourne (compte, mot de passe initial). Le mot de passe n'est affiché qu'une fois ;
-    la 2FA est imposée à la première connexion (enrôlement par QR code)."""
+    """Retourne (compte, code d'activation). Le code n'est affiché qu'une fois au planificateur, qui
+    le remet au salarié ; à la première connexion, celui-ci choisit son mot de passe puis active la
+    2FA (QR code). Personne d'autre que lui ne connaît son mot de passe."""
     identifiant = identifiant.strip().lower()
     if db.scalar(select(Utilisateur.id).where(func.lower(Utilisateur.identifiant) == identifiant)):
         raise ErreurAdmin(409, "Cet identifiant existe déjà.")
     if role == RoleUtilisateur.ADMIN and vehicule_id is not None:
         raise ErreurAdmin(422, "Un administrateur n'a pas de véhicule.")
     vehicule = _vehicule_valide(db, vehicule_id)
-    mdp = generer_mdp()
     u = Utilisateur(identifiant=identifiant, nom=" ".join(nom.upper().split()),
-                    prenom=" ".join(prenom.split()), role=role, mot_de_passe_hash=hacher_mdp(mdp),
+                    prenom=" ".join(prenom.split()), role=role,
                     vehicule_id=vehicule.id if vehicule else None,
                     type_livreur=TypeLivreur(type_livreur or "prestataire")
                     if role == RoleUtilisateur.LIVREUR else None)
+    code = nouveau_code_activation(u)
     db.add(u)
     db.flush()
     acteur.tracer(db, "ADMIN_CREATION_COMPTE", cible=identifiant, role=role.value,
                   type_livreur=u.type_livreur.value if u.type_livreur else None)
     db.commit()
-    return u, mdp
+    return u, code
+
+
+def nouveau_code_activation(u: Utilisateur) -> str:
+    """Remplace le mot de passe par un code d'activation à usage unique (haché comme un mot de
+    passe, jamais journalisé), valable `activation_validite_heures`."""
+    code = generer_code_activation()
+    u.mot_de_passe_hash = hacher_mdp(normaliser_code_activation(code))
+    u.mdp_a_definir = True
+    u.activation_expire_le = maintenant() + timedelta(hours=get_settings().activation_validite_heures)
+    return code
 
 
 ACTIONS_COMPTE = ("desactiver", "reactiver", "deverrouiller", "reinitialiser-mdp", "reinitialiser-2fa")
 
 
 def agir_sur_compte(db: Session, acteur: Acteur, utilisateur_id: int, action: str) -> tuple[Utilisateur, str | None]:
-    """Retourne (compte, mot de passe temporaire si réinitialisé)."""
+    """Retourne (compte, code d'activation si le mot de passe est réinitialisé)."""
     u = db.get(Utilisateur, utilisateur_id)
     if u is None:
         raise ErreurAdmin(404, "Compte introuvable.")
@@ -129,8 +140,8 @@ def agir_sur_compte(db: Session, acteur: Acteur, utilisateur_id: int, action: st
     elif action == "deverrouiller":
         u.verrouille_jusqua, u.tentatives_echec = None, 0
     elif action == "reinitialiser-mdp":
-        mdp = generer_mdp()
-        u.mot_de_passe_hash = hacher_mdp(mdp)
+        # Mot de passe oublié : nouveau code ; la 2FA déjà activée est conservée
+        mdp = nouveau_code_activation(u)
         u.verrouille_jusqua, u.tentatives_echec = None, 0
         u.sessions_invalidees_le = maintenant()
     elif action == "reinitialiser-2fa":                  # téléphone perdu : nouvel enrôlement

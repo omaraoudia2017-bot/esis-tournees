@@ -3,12 +3,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import (charge_acces, charge_preauth, contexte, utilisateur_courant,
-                          utilisateur_en_preauth, verifier_limite)
+                          utilisateur_en_activation, utilisateur_en_preauth, verifier_limite)
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.models import Utilisateur
-from app.schemas.auth import (DemandeCode, DemandeConnexion, ProfilUtilisateur, ReponseActivation,
-                              ReponseEnrolement, ReponseEtape1, ReponseJeton)
+from app.schemas.auth import (DemandeCode, DemandeConnexion, DemandeNouveauMdp, ProfilUtilisateur,
+                              ReponseActivation, ReponseEnrolement, ReponseEtape1, ReponseJeton)
 from app.services import auth as service
 from app.services.conditions import doit_accepter
 from app.services.journal import ContexteRequete
@@ -28,6 +28,21 @@ def connexion(demande: DemandeConnexion, db: Session = Depends(get_db),
     verifier_limite(db, ctx, f"connexion:{demande.identifiant.strip().lower()}")
     try:
         _, jeton, etape = service.etape_mot_de_passe(db, demande.identifiant, demande.mot_de_passe, ctx)
+    except service.ErreurAuth as e:
+        raise _http(e) from None
+    return ReponseEtape1(etape=etape, jeton_preauth=jeton,
+                         expire_dans_s=60 * get_settings().preauth_expire_minutes)
+
+
+@router.post("/mot-de-passe-initial", response_model=ReponseEtape1)
+def mot_de_passe_initial(demande: DemandeNouveauMdp, u: Utilisateur = Depends(utilisateur_en_activation),
+                         charge: dict = Depends(charge_preauth), db: Session = Depends(get_db),
+                         ctx: ContexteRequete = Depends(contexte)):
+    """Première connexion (après le code d'activation) : l'utilisateur choisit son mot de passe et
+    le confirme, puis passe à l'activation de la 2FA (QR code)."""
+    verifier_limite(db, ctx, f"mdp:{u.id}")
+    try:
+        jeton, etape = service.definir_mot_de_passe(db, u, demande.nouveau, demande.confirmation, charge, ctx)
     except service.ErreurAuth as e:
         raise _http(e) from None
     return ReponseEtape1(etape=etape, jeton_preauth=jeton,

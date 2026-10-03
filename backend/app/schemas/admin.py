@@ -26,6 +26,8 @@ class CompteVue(BaseModel):
     conditions_acceptees_le: datetime | None = None
     type_livreur: str | None = None
     domicile_renseigne: bool = False           # jamais l'adresse elle-même (minimisation)
+    activation_en_attente: bool = False        # code d'activation remis, mot de passe pas encore choisi
+    activation_expire_le: datetime | None = None
 
 
 class DemandeCompte(BaseModel):
@@ -41,8 +43,10 @@ class DemandeCompte(BaseModel):
 
 class ReponseCompte(BaseModel):
     compte: CompteVue
-    mot_de_passe_temporaire: str | None = Field(
-        None, description="Affiché une seule fois : à transmettre au salarié par un canal sûr")
+    code_activation: str | None = Field(
+        None, description="Affiché une seule fois : à remettre au salarié par un canal sûr. Il sert "
+                          "à la première connexion, pour choisir son mot de passe.")
+    code_expire_le: datetime | None = None
 
 
 class DemandeTypeLivreur(BaseModel):

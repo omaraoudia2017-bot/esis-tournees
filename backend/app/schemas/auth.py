@@ -11,9 +11,15 @@ class DemandeConnexion(BaseModel):
 
 
 class ReponseEtape1(BaseModel):
-    etape: Literal["verification", "enrolement"]
+    # nouveau_mot_de_passe : connexion avec le code d'activation, le mot de passe est à choisir
+    etape: Literal["verification", "enrolement", "nouveau_mot_de_passe"]
     jeton_preauth: str
     expire_dans_s: int
+
+
+class DemandeNouveauMdp(BaseModel):
+    nouveau: str = Field(min_length=1, max_length=128)
+    confirmation: str = Field(min_length=1, max_length=128)
 
 
 class DemandeCode(BaseModel):
