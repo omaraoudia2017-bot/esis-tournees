@@ -241,9 +241,14 @@ def heure_locale(iso: str | None) -> str:
     return datetime.fromisoformat(iso).astimezone(FUSEAU).strftime("%H:%M") if iso else "—"
 
 
-def action_tournee(chemin: str, message_ok: str | None = None, **kwargs) -> None:
-    """Appelle l'API puis recharge l'écran ; le message est affiché après le rechargement."""
-    r = appel_api("POST", chemin, st.session_state.jeton, **kwargs)
+def date_courte(iso: str) -> str:
+    return datetime.fromisoformat(iso).astimezone(FUSEAU).strftime("%d/%m/%Y")
+
+
+def action_tournee(chemin: str, message_ok: str | None = None, methode: str = "POST", **kwargs) -> None:
+    """Appelle l'API puis recharge l'écran ; le message est affiché après le rechargement.
+    message_ok peut être "reponse" : le message renvoyé par l'API est alors affiché."""
+    r = appel_api(methode, chemin, st.session_state.jeton, **kwargs)
     if r is None:
         return
     if r.status_code == 401:
@@ -254,9 +259,53 @@ def action_tournee(chemin: str, message_ok: str | None = None, **kwargs) -> None
         except ValueError:
             detail = None
         st.session_state.message_tournee = ("error", detail if isinstance(detail, str) else "Action refusée.")
+    elif message_ok == "reponse":
+        st.session_state.message_tournee = ("success", r.json().get("message", "C'est fait."))
     elif message_ok:
         st.session_state.message_tournee = ("success", message_ok)
     st.rerun()
+
+
+def bandeau_annulation(annulation: dict | None) -> None:
+    """« Terminer » cliqué par erreur : annulable quelques minutes (un démarrage, lui, s'annule
+    directement sur la carte de la livraison en cours, avec « Annuler le démarrage »)."""
+    if not annulation or annulation["action"] != "terminer":
+        return
+    action = "Terminer" if annulation["action"] == "terminer" else "Démarrer"
+    with st.container(border=True):
+        col1, col2 = st.columns([3, 2], vertical_alignment="center")
+        col1.caption(f"Dernier clic : « {action} » chez {html.escape(annulation['client'])}. "
+                     f"Annulable jusqu'à {heure_locale(annulation['expire_le'])}.")
+        if col2.button("Annuler ce clic", key="annuler_clic", width="stretch",
+                       help="Clic fait par erreur : la livraison revient à son état précédent. "
+                            "L'annulation est enregistrée."):
+            action_tournee("/tournees/du-jour/annuler-dernier-pointage", "reponse")
+
+
+def remarques_adresse(l: dict) -> None:
+    """Remarques laissées sur cette adresse pour les prochaines livraisons (texte chiffré en base)."""
+    remarques = l["client"].get("remarques") or []
+    if remarques:
+        # La plus récente bien visible : c'est souvent l'information qui évite un passage raté
+        st.info(f"Remarque du {date_courte(remarques[0]['cree_le'])} : {remarques[0]['texte']}")
+    titre = f"Remarques sur cette adresse ({len(remarques)})" if remarques else "Ajouter une remarque sur cette adresse"
+    with st.expander(titre):
+        for r in remarques:
+            col1, col2 = st.columns([5, 1], vertical_alignment="center")
+            col1.write(f"{date_courte(r['cree_le'])} — {r['texte']}")
+            if r["de_moi"] and col2.button("Supprimer", key=f"suppr_remarque_{l['id']}_{r['id']}"):
+                action_tournee(f"/remarques/{r['id']}", "Remarque supprimée.", methode="DELETE")
+        with st.form(f"remarque_{l['id']}", clear_on_submit=True):
+            texte = st.text_area("Nouvelle remarque", max_chars=300, height=80,
+                                 placeholder="Ex. : portail fermé le matin, sonner au 2e étage")
+            st.caption("Uniquement des informations utiles à la livraison, factuelles. Pas d'avis sur "
+                       "le client ni d'information sur sa santé ou sa vie privée.")
+            if st.form_submit_button("Enregistrer la remarque", width="stretch"):
+                if len(texte.strip()) < 3:
+                    st.error("La remarque est trop courte.")
+                else:
+                    action_tournee(f"/livraisons/{l['id']}/remarques", "Remarque enregistrée.",
+                                   json={"texte": texte})
 
 
 def optimiser() -> None:
@@ -356,21 +405,32 @@ def carte_livraison(l: dict, rang: int, demarrage_possible: bool, prochaine: boo
                     if c["telephone"]:
                         st.write(f"Téléphone : {c['telephone']}")
 
-        if l["statut"] == "a_livrer" and demarrage_possible:
+        if l["statut"] == "a_livrer":
+            # N'importe quel client de la tournée peut être démarré, dans l'ordre choisi par le livreur
             if st.button("Démarrer la livraison", key=f"demarrer_{l['id']}", width="stretch",
-                         type="primary" if prochaine else "secondary"):
+                         type="primary" if prochaine and demarrage_possible else "secondary",
+                         disabled=not demarrage_possible,
+                         help=None if demarrage_possible else
+                         "Une livraison est déjà en cours : terminez-la ou annulez son démarrage."):
                 action_tournee(f"/livraisons/{l['id']}/demarrer")
         elif l["statut"] == "en_cours":
             st.caption(f"Démarrée à {heure_locale(l['heure_debut_livraison'])}")
             issue = st.radio("Résultat du passage", list(ISSUES), horizontal=True, key=f"issue_{l['id']}")
-            if st.button("Terminer la livraison", key=f"terminer_{l['id']}", type="primary",
-                         width="stretch"):
+            col_fin, col_annul = st.columns([3, 2])
+            if col_fin.button("Terminer la livraison", key=f"terminer_{l['id']}", type="primary",
+                              width="stretch"):
                 action_tournee(f"/livraisons/{l['id']}/terminer", f"{c['nom']} : {issue.lower()}.",
                                json={"issue": ISSUES[issue]})
+            if col_annul.button("Annuler le démarrage", key=f"annuler_demarrage_{l['id']}", width="stretch",
+                                help="Mauvais client démarré : la livraison redevient « à livrer » et "
+                                     "vous pouvez démarrer un autre client. L'annulation est enregistrée."):
+                action_tournee(f"/livraisons/{l['id']}/annuler-demarrage",
+                               f"{c['nom']} : démarrage annulé, la livraison est de nouveau à faire.")
         elif l["heure_fin_livraison"]:
             duree = (l["temps_service_reel_s"] or 0) // 60
             st.caption(f"{heure_locale(l['heure_debut_livraison'])} → "
                        f"{heure_locale(l['heure_fin_livraison'])} ({duree} min sur place)")
+        remarques_adresse(l)
 
 
 def formulaire_ajout(tournee: dict) -> None:
@@ -451,6 +511,7 @@ def ecran_tournee(profil: dict) -> None:
                f"{t['heure_depart'][:5]}–{t['heure_fin'][:5]}")
     if message := st.session_state.pop("message_tournee", None):
         getattr(st, message[0])(message[1])
+    bandeau_annulation(t.get("annulation_possible"))
 
     faites = sum(l["statut"] in ("livre", "absent", "refuse") for l in livraisons)
     a_faire = [l for l in livraisons if l["statut"] in ("a_livrer", "en_cours")]

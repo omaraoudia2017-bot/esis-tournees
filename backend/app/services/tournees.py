@@ -352,3 +352,96 @@ def terminer_livraison(db: Session, livraison: Livraison, issue: StatutLivraison
     db.commit()
     db.refresh(livraison)          # relit temps_service_reel_s, calculé par PostgreSQL
     return livraison
+
+
+# --------------------------------------------------------------------------- annulation d'un clic
+@dataclass
+class DernierPointage:
+    livraison: Livraison
+    client: Client
+    action: str                 # "demarrer" ou "terminer"
+    instant: datetime
+
+
+def dernier_pointage(db: Session, tournee: Tournee) -> DernierPointage | None:
+    """Dernier clic Démarrer ou Terminer de la tournée (le plus récent des horodatages)."""
+    candidats = []
+    for l, c in livraisons_de(db, tournee):
+        if l.statut in ISSUES_POSSIBLES and l.heure_fin_livraison is not None:
+            candidats.append(DernierPointage(l, c, "terminer", l.heure_fin_livraison))
+        elif l.statut == StatutLivraison.EN_COURS and l.heure_debut_livraison is not None:
+            candidats.append(DernierPointage(l, c, "demarrer", l.heure_debut_livraison))
+    return max(candidats, key=lambda d: d.instant, default=None)
+
+
+def pointage_annulable(db: Session, tournee: Tournee, reglages: Settings) -> DernierPointage | None:
+    """Seul le DERNIER clic est annulable, pendant quelques minutes, et seulement le jour même :
+    on corrige une erreur de manipulation, on ne réécrit pas l'historique de la journée.
+    (Un démarrage en cours peut en plus être annulé sans délai : voir annuler_demarrage.)"""
+    if tournee.date_tournee != aujourdhui(reglages):
+        return None
+    dernier = dernier_pointage(db, tournee)
+    delai = timedelta(minutes=reglages.delai_annulation_pointage_min)
+    if dernier is None or maintenant() - dernier.instant > delai:
+        return None
+    return dernier
+
+
+def annuler_dernier_pointage(db: Session, tournee: Tournee, reglages: Settings, livreur: Utilisateur,
+                             ctx: ContexteRequete | None) -> DernierPointage:
+    """« Terminer » annulé : la livraison redevient « en cours » (heure de fin effacée).
+    « Démarrer » annulé : elle redevient « à livrer » (heure de début effacée).
+    L'annulation est tracée au journal : un pointage ne disparaît jamais sans laisser de trace."""
+    dernier = pointage_annulable(db, tournee, reglages)
+    if dernier is None:
+        raise ErreurTournee(409, "Aucun clic à annuler : seul le dernier Démarrer ou Terminer peut "
+                                 f"être annulé, dans les {reglages.delai_annulation_pointage_min} minutes.")
+    livraison, statut_annule = dernier.livraison, dernier.livraison.statut
+    if dernier.action == "terminer":
+        livraison.statut = StatutLivraison.EN_COURS
+        livraison.heure_fin_livraison = None
+        tournee.statut = StatutTournee.EN_COURS
+        if statut_annule == StatutLivraison.LIVRE:
+            # RGPD : la date de dernière livraison revient à la précédente livraison réussie
+            db.flush()
+            db.get(Client, livraison.client_id).derniere_livraison_le = db.scalar(
+                select(func.max(Livraison.heure_fin_livraison)).where(
+                    Livraison.client_id == livraison.client_id, Livraison.statut == StatutLivraison.LIVRE))
+    else:
+        _remettre_a_livrer(db, tournee, livraison)
+    journaliser(db, "POINTAGE_ANNULE", True, ctx, livreur.id, livreur.identifiant,
+                tournee_id=tournee.id, livraison_id=livraison.id, action=dernier.action,
+                statut_annule=statut_annule.value,
+                horodatage_annule=dernier.instant.isoformat(timespec="seconds"))
+    db.commit()
+    db.refresh(livraison)          # temps_service_reel_s recalculé (NULL) par PostgreSQL
+    return dernier
+
+
+def _remettre_a_livrer(db: Session, tournee: Tournee, livraison: Livraison) -> None:
+    livraison.statut = StatutLivraison.A_LIVRER
+    livraison.heure_debut_livraison = None
+    db.flush()
+    commencee = db.scalar(select(Livraison.id).where(
+        Livraison.tournee_id == tournee.id, Livraison.heure_debut_livraison.is_not(None)).limit(1))
+    if commencee is None:
+        tournee.statut = StatutTournee.PLANIFIEE          # rien n'a encore été pointé
+
+
+def annuler_demarrage(db: Session, livraison: Livraison, reglages: Settings, livreur: Utilisateur,
+                      ctx: ContexteRequete | None) -> Livraison:
+    """Mauvais client démarré : tant que la livraison est « en cours » (pas encore terminée), le
+    démarrage peut être annulé, sans délai. La livraison redevient « à livrer » et le livreur peut
+    démarrer n'importe quel autre client. Tracé au journal."""
+    tournee = _tournee_modifiable(db, livraison, reglages)
+    if livraison.statut != StatutLivraison.EN_COURS:
+        raise ErreurTournee(409, "Seule une livraison en cours peut être remise « à livrer ».")
+    debut = livraison.heure_debut_livraison
+    _remettre_a_livrer(db, tournee, livraison)
+    journaliser(db, "POINTAGE_ANNULE", True, ctx, livreur.id, livreur.identifiant,
+                tournee_id=tournee.id, livraison_id=livraison.id, action="demarrer",
+                statut_annule=StatutLivraison.EN_COURS.value,
+                horodatage_annule=debut.isoformat(timespec="seconds") if debut else None)
+    db.commit()
+    db.refresh(livraison)
+    return livraison

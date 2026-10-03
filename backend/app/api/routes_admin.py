@@ -6,12 +6,12 @@ journalisée). La logique est dans app/services/admin.py et app/services/import_
 """
 from datetime import date, datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import exiger_role
-from app.api.routes_tournees import geocodeur, vue_tournee
+from app.api.routes_tournees import geocodeur, vue_remarque, vue_tournee
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.models import Client, JournalSecurite, Tournee, Utilisateur, Vehicule, Zone
@@ -22,9 +22,10 @@ from app.schemas.admin import (BilanGeocodageVue, ClientResume, CompteVue, Deman
                                ReponseCompte, ReponseImport, RejetVue, TableauDeBordVue,
                                TourneeResume, VehiculeVue)
 from app.schemas.auth import EvenementJournal
-from app.schemas.tournee import TourneeVue
+from app.schemas.tournee import RemarqueVue, TourneeVue
 from app.services import admin as service
 from app.services import import_csv
+from app.services import remarques as remarques_service
 from app.services.geocodage import Geocodeur
 from app.services.journal import contexte_depuis, tracer_consultation
 
@@ -188,7 +189,7 @@ def detail_tournee(tournee_id: int, a: service.Acteur = Depends(acteur), db: Ses
     if tournee is None:
         raise HTTPException(404, "Tournée introuvable.")
     tracer_consultation(db, a.utilisateur, a.ctx, tournee.id)
-    return vue_tournee(db, tournee)
+    return vue_tournee(db, tournee, lecteur_id=a.utilisateur.id)
 
 
 @router.post("/tournees/{tournee_id}/clients", status_code=201)
@@ -248,6 +249,24 @@ def anonymiser_client(demande: DemandeAnonymisation, id_client: str = Path(patte
 
 
 # --------------------------------------------------------------------------- suivi
+@router.get("/clients/{id_client}/remarques", response_model=list[RemarqueVue])
+def remarques_client(id_client: str = Path(pattern=MOTIF_ID_CLIENT), db: Session = Depends(get_db)):
+    """Toutes les remarques laissées sur l'adresse d'un client (contrôle du contenu)."""
+    if db.get(Client, id_client) is None:
+        raise HTTPException(404, "Client introuvable.")
+    return [vue_remarque(r, None) for r in remarques_service.toutes_les_remarques(db, id_client)]
+
+
+@router.delete("/remarques/{remarque_id}", status_code=204)
+def supprimer_remarque(remarque_id: int, a: service.Acteur = Depends(acteur), db: Session = Depends(get_db)):
+    """Suppression d'une remarque inadaptée (jugement sur la personne, donnée excessive)."""
+    try:
+        remarques_service.supprimer_remarque(db, remarque_id, a.utilisateur, a.ctx, admin=True)
+    except remarques_service.ErreurRemarque as e:
+        raise HTTPException(e.statut, e.message) from None
+    return Response(status_code=204)
+
+
 @router.get("/tableau-de-bord", response_model=TableauDeBordVue)
 def tableau_de_bord(jours: int = Query(30, ge=1, le=365), db: Session = Depends(get_db)):
     """Respect des créneaux, remplissage des tournées, écart temps de service prédit / réel,

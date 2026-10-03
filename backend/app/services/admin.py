@@ -31,6 +31,7 @@ from app.services.geocodage import cle_cache
 from app.services.journal import ContexteRequete, journaliser
 from app.services.planification import estimer_temps_service_s, periodes
 from app.services.referentiel import zone_id_pour
+from app.services.remarques import effacer_remarques_client, toutes_les_remarques
 from app.services.tournees import ISSUES_POSSIBLES, aujourdhui, maintenant
 
 DUREE_PLAUSIBLE_S = (60, 90 * 60)        # pointages retenus pour l'écart de temps de service
@@ -359,6 +360,8 @@ def exporter_client(db: Session, acteur: Acteur, reglages: Settings, id_client: 
         "livraisons": [{"date": d.isoformat(), "statut": l.statut.value,
                         "debut": h(l.heure_debut_livraison), "fin": h(l.heure_fin_livraison)}
                        for l, d in passages],
+        "remarques": [{"date": h(r.cree_le), "texte": r.texte}
+                      for r in toutes_les_remarques(db, id_client)],
     }
     acteur.tracer(db, "RGPD_EXPORT", client_id=id_client)
     db.commit()
@@ -390,7 +393,8 @@ def anonymiser_client(db: Session, acteur: Acteur, reglages: Settings, id_client
     client.latitude = client.longitude = client.geocode_precision = client.geocode_le = None
     client.est_immeuble = client.etage = client.ascenseur = None
     client.actif = False
-    acteur.tracer(db, "RGPD_ANONYMISATION", client_id=id_client)
+    nb_remarques = effacer_remarques_client(db, id_client)      # texte libre : peut identifier
+    acteur.tracer(db, "RGPD_ANONYMISATION", client_id=id_client, remarques_effacees=nb_remarques)
     db.commit()
     return client
 

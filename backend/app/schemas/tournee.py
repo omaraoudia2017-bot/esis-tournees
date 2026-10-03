@@ -11,6 +11,13 @@ class Point(BaseModel):
     longitude: float
 
 
+class RemarqueVue(BaseModel):
+    id: int
+    texte: str
+    cree_le: datetime
+    de_moi: bool = False          # le livreur connecté peut supprimer ses propres remarques
+
+
 class ClientVue(BaseModel):
     id_client: str
     nom: str
@@ -28,6 +35,8 @@ class ClientVue(BaseModel):
     telephone: str | None
     digicode: str | None
     notes_livraison: str | None
+    # Remarques laissées sur cette adresse lors des passages précédents (les plus récentes)
+    remarques: list[RemarqueVue] = []
 
 
 class LivraisonVue(BaseModel):
@@ -41,6 +50,14 @@ class LivraisonVue(BaseModel):
     temps_service_reel_s: int | None
     temps_service_predit_s: int | None
     client: ClientVue
+
+
+class AnnulationPossible(BaseModel):
+    """Dernier clic Démarrer / Terminer encore annulable (sinon le champ vaut null)."""
+    action: Literal["demarrer", "terminer"]
+    livraison_id: int
+    client: str
+    expire_le: datetime
 
 
 class TourneeVue(BaseModel):
@@ -58,6 +75,7 @@ class TourneeVue(BaseModel):
     duree_estimee_min: int | None
     depot: Point
     livraisons: list[LivraisonVue]
+    annulation_possible: AnnulationPossible | None = None
 
 
 class ReponseOptimisation(BaseModel):
@@ -104,3 +122,14 @@ class DemandeAjoutClient(BaseModel):
 class ReponseAjout(BaseModel):
     livraison: LivraisonVue
     avertissement: str | None = None
+
+
+class ReponseAnnulation(BaseModel):
+    action_annulee: Literal["demarrer", "terminer"]
+    message: str
+    livraison: LivraisonVue
+
+
+class DemandeRemarque(BaseModel):
+    texte: str = Field(min_length=3, max_length=300,
+                       description="Information utile pour les prochaines livraisons à cette adresse")

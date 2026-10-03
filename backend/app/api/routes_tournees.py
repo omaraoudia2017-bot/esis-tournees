@@ -1,18 +1,21 @@
 """Routes du livreur : tournée du jour, bouton « Optimiser », pointage Démarrer / Terminer,
-ajout d'une adresse en cours de tournée."""
+annulation du dernier clic, ajout d'une adresse en cours de tournée, remarques sur une adresse."""
+from datetime import timedelta
 from functools import lru_cache
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
 from app.api.deps import exiger_role
 from app.core.config import get_settings
 from app.db.session import get_db
-from app.models import Client, Livraison, Tournee, Utilisateur, Vehicule, Zone
+from app.models import Client, Livraison, RemarqueClient, Tournee, Utilisateur, Vehicule, Zone
 from app.models.enums import RoleUtilisateur, StatutLivraison
 from app.optim.probleme import en_heure
-from app.schemas.tournee import (ClientVue, DemandeAjoutClient, DemandeFin, LivraisonVue, Point,
-                                 ReponseAjout, ReponseOptimisation, TourneeVue)
+from app.schemas.tournee import (AnnulationPossible, ClientVue, DemandeAjoutClient, DemandeFin,
+                                 DemandeRemarque, LivraisonVue, Point, RemarqueVue, ReponseAjout,
+                                 ReponseAnnulation, ReponseOptimisation, TourneeVue)
+from app.services import remarques as remarques_service
 from app.services import tournees as service
 from app.services.geocodage import Geocodeur
 from app.services.journal import contexte_depuis, journaliser, tracer_consultation
@@ -32,7 +35,13 @@ def _http(erreur: service.ErreurTournee) -> HTTPException:
     return HTTPException(erreur.statut, erreur.message)
 
 
-def vue_livraison(l: Livraison, c: Client) -> LivraisonVue:
+def vue_remarque(r: RemarqueClient, lecteur_id: int | None) -> RemarqueVue:
+    return RemarqueVue(id=r.id, texte=r.texte, cree_le=r.cree_le,
+                       de_moi=lecteur_id is not None and r.auteur_id == lecteur_id)
+
+
+def vue_livraison(l: Livraison, c: Client, remarques: list[RemarqueClient] | None = None,
+                  lecteur_id: int | None = None) -> LivraisonVue:
     return LivraisonVue(
         id=l.id, ordre_passage=l.ordre_passage, statut=l.statut.value,
         ajout_a_la_volee=l.ajout_a_la_volee, heure_arrivee_prevue=l.heure_arrivee_prevue,
@@ -46,12 +55,27 @@ def vue_livraison(l: Livraison, c: Client) -> LivraisonVue:
             creneau_debut=c.creneau_debut, creneau_fin=c.creneau_fin,
             type_camion_requis=c.type_camion_requis.value, etage=c.etage, ascenseur=c.ascenseur,
             telephone=c.telephone, digicode=c.digicode, notes_livraison=c.notes_livraison,
+            remarques=[vue_remarque(r, lecteur_id) for r in remarques or []],
         ),
     )
 
 
-def vue_tournee(db: Session, t: Tournee) -> TourneeVue:
+def vue_livraison_seule(db: Session, l: Livraison, c: Client, lecteur_id: int) -> LivraisonVue:
+    remarques = remarques_service.remarques_par_client(db, [c.id_client], get_settings().remarques_affichees)
+    return vue_livraison(l, c, remarques[c.id_client], lecteur_id)
+
+
+def vue_tournee(db: Session, t: Tournee, lecteur_id: int | None = None) -> TourneeVue:
+    """Vue commune au livreur et au suivi par l'administrateur (lecteur_id : compte connecté)."""
     reglages = get_settings()
+    lignes = service.livraisons_de(db, t)
+    remarques = remarques_service.remarques_par_client(db, [c.id_client for _, c in lignes],
+                                                       reglages.remarques_affichees)
+    annulation = None
+    if lecteur_id == t.livreur_id and (dernier := service.pointage_annulable(db, t, reglages)):
+        annulation = AnnulationPossible(
+            action=dernier.action, livraison_id=dernier.livraison.id, client=dernier.client.nom_client,
+            expire_le=dernier.instant + timedelta(minutes=reglages.delai_annulation_pointage_min))
     zone = db.get(Zone, t.zone_id) if t.zone_id else None
     vehicule = db.get(Vehicule, t.vehicule_id) if t.vehicule_id else None
     depart_s, fin_s = service.bornes_horaires(t, reglages)
@@ -66,7 +90,8 @@ def vue_tournee(db: Session, t: Tournee) -> TourneeVue:
         duree_estimee_min=t.duree_estimee_min,
         depot=Point(nom=reglages.depot_nom, latitude=reglages.depot_latitude,
                     longitude=reglages.depot_longitude),
-        livraisons=[vue_livraison(l, c) for l, c in service.livraisons_de(db, t)],
+        livraisons=[vue_livraison(l, c, remarques[c.id_client], lecteur_id) for l, c in lignes],
+        annulation_possible=annulation,
     )
 
 
@@ -91,7 +116,7 @@ def tournee_du_jour(request: Request, u: Utilisateur = Depends(livreur_connecte)
     except service.ErreurTournee as e:
         raise _http(e) from None
     tracer_consultation(db, u, contexte_depuis(request), tournee.id)
-    return vue_tournee(db, tournee)
+    return vue_tournee(db, tournee, lecteur_id=u.id)
 
 
 @router.post("/tournees/du-jour/optimiser", response_model=ReponseOptimisation)
@@ -115,7 +140,7 @@ def demarrer(livraison_id: int, request: Request, u: Utilisateur = Depends(livre
         livraison = service.demarrer_livraison(db, livraison, get_settings())
     except service.ErreurTournee as e:
         raise _http(e) from None
-    return vue_livraison(livraison, db.get(Client, livraison.client_id))
+    return vue_livraison_seule(db, livraison, db.get(Client, livraison.client_id), u.id)
 
 
 @router.post("/livraisons/{livraison_id}/terminer", response_model=LivraisonVue)
@@ -128,7 +153,67 @@ def terminer(livraison_id: int, request: Request, demande: DemandeFin | None = N
         livraison = service.terminer_livraison(db, livraison, issue, get_settings())
     except service.ErreurTournee as e:
         raise _http(e) from None
-    return vue_livraison(livraison, db.get(Client, livraison.client_id))
+    return vue_livraison_seule(db, livraison, db.get(Client, livraison.client_id), u.id)
+
+
+@router.post("/livraisons/{livraison_id}/annuler-demarrage", response_model=LivraisonVue)
+def annuler_demarrage(livraison_id: int, request: Request, u: Utilisateur = Depends(livreur_connecte),
+                      db: Session = Depends(get_db)):
+    """Bouton « Annuler le démarrage » : client démarré par erreur, la livraison redevient
+    « à livrer » tant qu'elle n'est pas terminée (sans délai). Tracé au journal."""
+    livraison = _livraison_autorisee(request, db, livraison_id, u)
+    try:
+        livraison = service.annuler_demarrage(db, livraison, get_settings(), u, contexte_depuis(request))
+    except service.ErreurTournee as e:
+        raise _http(e) from None
+    return vue_livraison_seule(db, livraison, db.get(Client, livraison.client_id), u.id)
+
+
+@router.post("/tournees/du-jour/annuler-dernier-pointage", response_model=ReponseAnnulation)
+def annuler_dernier_pointage(request: Request, u: Utilisateur = Depends(livreur_connecte),
+                             db: Session = Depends(get_db)):
+    """Clic fait par erreur : annule le DERNIER Démarrer ou Terminer de la tournée du jour,
+    dans le délai prévu (10 min par défaut). Aucun identifiant n'est accepté : le livreur ne
+    peut agir que sur sa propre tournée. L'annulation est tracée au journal de sécurité."""
+    reglages = get_settings()
+    try:
+        tournee = service.tournee_du_jour(db, u, reglages)
+        dernier = service.annuler_dernier_pointage(db, tournee, reglages, u, contexte_depuis(request))
+    except service.ErreurTournee as e:
+        raise _http(e) from None
+    nom = dernier.client.nom_client
+    message = (f"{nom} : fin de livraison annulée, la livraison est de nouveau en cours."
+               if dernier.action == "terminer" else f"{nom} : démarrage annulé, la livraison est de nouveau à faire.")
+    return ReponseAnnulation(action_annulee=dernier.action, message=message,
+                             livraison=vue_livraison_seule(db, dernier.livraison, dernier.client, u.id))
+
+
+@router.post("/livraisons/{livraison_id}/remarques", response_model=RemarqueVue, status_code=201)
+def ajouter_remarque(livraison_id: int, demande: DemandeRemarque, request: Request,
+                     u: Utilisateur = Depends(livreur_connecte), db: Session = Depends(get_db)):
+    """Remarque sur l'adresse d'un client de SA tournée, visible lors des prochaines livraisons."""
+    livraison = _livraison_autorisee(request, db, livraison_id, u)
+    try:
+        service._tournee_modifiable(db, livraison, get_settings())     # tournée du jour uniquement
+    except service.ErreurTournee as e:
+        raise _http(e) from None
+    try:
+        remarque = remarques_service.ajouter_remarque(db, livraison.client_id, u, demande.texte,
+                                                      contexte_depuis(request))
+    except remarques_service.ErreurRemarque as e:
+        raise HTTPException(e.statut, e.message) from None
+    return vue_remarque(remarque, u.id)
+
+
+@router.delete("/remarques/{remarque_id}", status_code=204)
+def supprimer_remarque(remarque_id: int, request: Request, u: Utilisateur = Depends(livreur_connecte),
+                       db: Session = Depends(get_db)):
+    """Le livreur supprime une de SES remarques (erreur de saisie)."""
+    try:
+        remarques_service.supprimer_remarque(db, remarque_id, u, contexte_depuis(request))
+    except remarques_service.ErreurRemarque as e:
+        raise HTTPException(e.statut, e.message) from None
+    return Response(status_code=204)
 
 
 @router.post("/tournees/du-jour/clients", response_model=ReponseAjout, status_code=201)
@@ -145,4 +230,5 @@ def ajouter_client(demande: DemandeAjoutClient, request: Request,
             contexte_depuis(request))
     except service.ErreurTournee as e:
         raise _http(e) from None
-    return ReponseAjout(livraison=vue_livraison(livraison, client), avertissement=avertissement)
+    return ReponseAjout(livraison=vue_livraison_seule(db, livraison, client, u.id),
+                        avertissement=avertissement)

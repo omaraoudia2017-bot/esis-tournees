@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     modele_anomalies: str = "/app/modeles/anomalies.joblib"
     utiliser_detection_anomalies: bool = True
 
+    # Écran du livreur : annulation d'un clic Démarrer / Terminer fait par erreur
+    delai_annulation_pointage_min: int = 10
+    # Remarques sur une adresse : nombre de remarques récentes affichées au livreur
+    remarques_affichees: int = 5
+
     # Géocodage : Nominatim exige un user-agent qui identifie l'application
     nominatim_user_agent: str = "esis-tournees/0.2 (projet etudiant ESIS)"
 

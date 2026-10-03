@@ -22,7 +22,7 @@ EVENEMENTS = ["(tous)", "CONNEXION_ANORMALE", "CONNEXION_ECHEC", "CONNEXION_REUS
               "ACCES_REFUSE", "IMPORT_CSV", "ADMIN_CREATION_COMPTE", "ADMIN_DESACTIVER",
               "ADMIN_REINITIALISER_MDP", "ADMIN_REINITIALISER_2FA", "ADMIN_ATTRIBUTION_TOURNEE",
               "ADMIN_CORRECTION_CLIENT", "RGPD_EXPORT", "RGPD_ANONYMISATION", "AJOUT_CLIENT_VOLEE",
-              "CONSULTATION_TOURNEE"]
+              "CONSULTATION_TOURNEE", "POINTAGE_ANNULE", "REMARQUE_AJOUTEE", "REMARQUE_SUPPRIMEE"]
 
 outils = None          # fourni par app.py : appel_api, reinitialiser, carte_tournee, heure_locale
 
@@ -404,6 +404,7 @@ def recherche_et_rgpd() -> None:
                           format_func=lambda c: f"{c['id_client']} — {c['nom']}")
     if not client:
         return
+    remarques_client(client)
     st.write("**Droits RGPD** (chaque action est inscrite au journal de sécurité)")
     col1, col2 = st.columns(2)
     with col1:
@@ -430,6 +431,23 @@ def recherche_et_rgpd() -> None:
                     annoncer("success", f"Client {client['id_client']} anonymisé.")
         else:
             st.caption("Client inactif ou déjà anonymisé.")
+
+
+def remarques_client(client: dict) -> None:
+    """Remarques des livreurs sur cette adresse : l'administrateur supprime celles qui sont
+    inadaptées (avis sur la personne, information excessive : zone de commentaire libre, CNIL)."""
+    remarques = api("GET", f"/admin/clients/{client['id_client']}/remarques") or []
+    with st.expander(f"Remarques des livreurs sur cette adresse ({len(remarques)})"):
+        if not remarques:
+            st.caption("Aucune remarque.")
+        for r in remarques:
+            col1, col2 = st.columns([6, 1], vertical_alignment="center")
+            col1.write(f"{date_fr(r['cree_le'])} — {r['texte']}")
+            if col2.button("Supprimer", key=f"admin_suppr_remarque_{r['id']}"):
+                rep = outils.appel_api("DELETE", f"/admin/remarques/{r['id']}", st.session_state.jeton)
+                if rep is not None and rep.status_code == 204:
+                    annoncer("success", "Remarque supprimée (action inscrite au journal).")
+                st.error("Suppression impossible : rechargez la page.")
 
 
 # --------------------------------------------------------------------------- sécurité
