@@ -5,14 +5,15 @@ Appelé par app.py, qui fournit les outils communs (appel à l'API, session, car
 Toutes les règles (droits, refus, journal) sont appliquées par l'API : cet écran ne fait qu'afficher.
 """
 import json
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import folium
 import pandas as pd
 import streamlit as st
 from streamlit_folium import st_folium
 
-ONGLETS = ["Tableau de bord", "Tournées du jour", "Import CSV", "Répartition", "Livreurs", "Clients", "Sécurité"]
+ONGLETS = ["Tableau de bord", "Planning", "Tournées du jour", "Import CSV", "Répartition", "Livreurs", "Clients",
+           "Sécurité"]
 STATUTS_TOURNEE = {"planifiee": "Planifiée", "en_cours": "En cours", "terminee": "Terminée"}
 LIBELLES_STATUT = {"a_livrer": "À livrer", "en_cours": "En cours", "livre": "Livré", "absent": "Absent",
                    "refuse": "Refusé", "reporte": "À reporter"}
@@ -374,6 +375,181 @@ def apercu_formulaire(a: dict, nb_saisis: int) -> None:
             st.error("Identifiants inconnus : " + ", ".join(a["inconnus"]))
         if a["non_localises"]:
             st.error("Clients sans position (géocodage à faire) : " + ", ".join(a["non_localises"]))
+
+
+# --------------------------------------------------------------------------- planning des livreurs
+JOURS_COURTS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
+COULEURS_STATUT = {"planifiee": "blue", "en_cours": "orange", "terminee": "green"}
+ICONES_STATUT = {"planifiee": ":material/schedule:", "en_cours": ":material/local_shipping:",
+                 "terminee": ":material/check_circle:"}
+PLAGES = {(7, 14): "Matin", (13, 19): "Après-midi", (17, 22): "Soirée", (7, 22): "Journée"}
+
+
+def plage_texte(debut: str | None, fin: str | None) -> str:
+    if not debut or not fin:
+        return "Journée"
+    d, f = int(debut[:2]), int(fin[:2])
+    return PLAGES.get((d, f), f"{d} h–{f} h")
+
+
+def tournees_proposees_restantes() -> list[dict]:
+    """Tournées proposées dans « Répartition » et pas encore attribuées (gardées pour la session)."""
+    prop = st.session_state.get("proposition")
+    if not prop:
+        return []
+    fiches = {c["id_client"]: c for g in prop["groupes"] for c in g["clients"]}
+    aff = st.session_state.get("affectation") or {c["id_client"]: g["numero"] for g in prop["groupes"]
+                                                  for c in g["clients"]}
+    attribuees = st.session_state.get("attribuees", {})
+    restantes = []
+    for g in prop["groupes"]:
+        ids = [i for i, n in aff.items() if n == g["numero"]]
+        if ids and g["numero"] not in attribuees:
+            restantes.append({**g, "ids": ids, "date": prop["date_tournee"],
+                              "creneaux": sorted(fiches[i]["creneau_debut"] or "07:00" for i in ids)})
+    return restantes
+
+
+def onglet_planning() -> None:
+    aujourdhui = date.today()
+    st.session_state.setdefault("planning_debut", aujourdhui - timedelta(days=aujourdhui.weekday()))
+    debut = st.session_state.planning_debut
+    c1, c2, c3, c4 = st.columns([1, 1, 1, 3])
+    if c1.button("◀ Semaine précédente", width="stretch"):
+        st.session_state.planning_debut = debut - timedelta(days=7)
+        st.rerun()
+    if c2.button("Cette semaine", width="stretch"):
+        st.session_state.planning_debut = aujourdhui - timedelta(days=aujourdhui.weekday())
+        st.rerun()
+    if c3.button("Semaine suivante ▶", width="stretch"):
+        st.session_state.planning_debut = debut + timedelta(days=7)
+        st.rerun()
+    c4.markdown(f"#### Semaine du {debut:%d/%m} au {debut + timedelta(days=6):%d/%m/%Y}")
+    p = api("GET", "/admin/planning", params={"debut": debut.isoformat()})
+    if p is None:
+        return
+
+    # ---- tournées à attribuer (en attente + proposées dans « Répartition »)
+    bac: dict[str, dict] = {}
+    for t in p["a_attribuer"]:
+        bac[f"attente:{t['id']}"] = {
+            "nature": "attente", "id": t["id"], "date": t["date_tournee"], "zone": t["zone"],
+            "plage": plage_texte(t["heure_depart"], t["heure_fin"]), "nb": t["nb_clients"],
+            "camion": t["type_camion_requis"] or "normal", "origine": "attribution annulée"}
+    for g in tournees_proposees_restantes():
+        if date.fromisoformat(g["date"]) >= aujourdhui:
+            bac[f"prop:{g['numero']}"] = {
+                "nature": "proposee", "numero": g["numero"], "date": g["date"], "zone": g["zone"],
+                "plage": LIBELLES_PERIODE[g["periode"]], "nb": len(g["ids"]), "camion": g["type_camion"],
+                "periode": g["periode"], "ids": g["ids"], "origine": f"proposée n° {g['numero']}",
+                "depart": (g["depart_au_plus_tard"] or "")[:5]}
+
+    def libelle_bac(cle: str) -> str:
+        if cle == "":
+            return "— aucune (consulter le planning) —"
+        b = bac[cle]
+        j = date.fromisoformat(b["date"])
+        return (f"{JOURS_SEMAINE[j.weekday()]} {j:%d/%m} · {b['plage']} · {b['zone'] or 'zone ?'} · {b['nb']} clients · "
+                f"camion {b['camion']} ({b['origine']})")
+
+    with st.container(border=True):
+        st.markdown(f"**Tournées à attribuer ({len(bac)})**")
+        if not bac:
+            st.caption("Aucune tournée à attribuer. Préparez des tournées dans « Répartition » (import puis "
+                       "« Classer et proposer ») : elles apparaîtront ici.")
+            choix = None
+        else:
+            cle = st.radio("Tournée à attribuer", [""] + list(bac), format_func=libelle_bac, key="planning_choix",
+                           label_visibility="collapsed")
+            choix = bac.get(cle)
+            if choix:
+                j = date.fromisoformat(choix["date"])
+                st.info(f"Cliquez sur **« Attribuer »** dans la colonne du **{JOURS_SEMAINE[j.weekday()]} {j:%d/%m}**, "
+                        f"sur la ligne du livreur voulu (camion {choix['camion']}, libre ce jour-là).")
+                if not (debut <= j <= debut + timedelta(days=6)):
+                    st.warning("Cette tournée n'est pas dans la semaine affichée : changez de semaine.")
+
+    # ---- grille livreurs x jours
+    jours = [date.fromisoformat(j) for j in p["jours"]]
+    cases = {(c["livreur_id"], c["date"]): c for c in p["cases"]}
+    largeurs = [2] + [1] * len(jours)
+    entete = st.columns(largeurs)
+    entete[0].markdown("**Livreur**")
+    for col, j in zip(entete[1:], jours):
+        col.markdown(f"**{JOURS_COURTS[j.weekday()]} {j:%d/%m}**" + (" · aujourd'hui" if j == aujourdhui else ""))
+    if not p["livreurs"]:
+        st.info("Aucun livreur actif.")
+    for l in p["livreurs"]:
+        ligne = st.columns(largeurs)
+        ligne[0].markdown(f"**{l['nom']}**  \n:gray[{l['vehicule'] or 'sans camion'}"
+                          f"{' · ' + l['type_camion'] if l['type_camion'] else ''}]")
+        for col, j in zip(ligne[1:], jours):
+            case = cases.get((l["id"], j.isoformat()))
+            cle = f"pl_{l['id']}_{j.isoformat()}"
+            if case and case["nature"] == "tournee":
+                couleur = COULEURS_STATUT.get(case["statut"], "gray")
+                texte = f":{couleur}[{plage_texte(case['heure_depart'], case['heure_fin'])} · {case['nb_clients']} cl.]"
+                if col.button(texte, key=cle, width="stretch", icon=ICONES_STATUT.get(case["statut"]),
+                              help=f"{STATUTS_TOURNEE.get(case['statut'], case['statut'])} · {case['zone'] or ''} · "
+                                   f"{case['nb_terminees']} pointé(s) · cliquer pour voir ou modifier"):
+                    st.session_state.planning_detail = {**case, "livreur": l["identifiant"], "livreur_nom": l["nom"]}
+                    st.rerun()
+            elif case:
+                col.button(f":violet[Trajets · {case['nb_etapes']}]", key=cle, width="stretch", disabled=True,
+                           icon=":material/route:",
+                           help="Journée de trajets saisie par le livreur (sans tournée).")
+            elif choix and choix["date"] == j.isoformat() and j >= aujourdhui:
+                if l["type_camion"] == choix["camion"]:
+                    if col.button("Attribuer", key=cle, type="primary", width="stretch", icon=":material/add:",
+                                  help=f"Donner cette tournée à {l['nom']}"):
+                        attribuer_depuis_planning(choix, l, j)
+                else:
+                    col.button(":gray[camion ≠]", key=cle, width="stretch", disabled=True,
+                               help=f"Cette tournée exige un camion {choix['camion']}.")
+            else:
+                col.markdown(":gray[—]" if j < aujourdhui else ":gray[libre]")
+    st.caption("Tournée prévue (horloge), en cours (camion), terminée (coche) ; journée de trajets (itinéraire). "
+               "Cliquez sur une tournée pour la voir, changer de livreur ou annuler l'attribution.")
+
+    # ---- détail d'une tournée cliquée (oublié si la tournée a changé de livreur entre-temps)
+    detail = st.session_state.get("planning_detail")
+    if detail and cases.get((detail["livreur_id"], detail["date"]), {}).get("tournee_id") != detail["tournee_id"]:
+        st.session_state.pop("planning_detail", None)
+        detail = None
+    if detail:
+        st.divider()
+        j = date.fromisoformat(detail["date"])
+        c1, c2 = st.columns([5, 1])
+        c1.subheader(f"{detail['livreur_nom']} — {JOURS_SEMAINE[j.weekday()]} {j:%d/%m/%Y} · "
+                     f"{plage_texte(detail['heure_depart'], detail['heure_fin'])} · {detail['nb_clients']} clients")
+        if c2.button("Fermer", width="stretch"):
+            st.session_state.pop("planning_detail", None)
+            st.rerun()
+        suivi_tournee({"id": detail["tournee_id"], "statut": detail["statut"], "date_tournee": detail["date"],
+                       "livreur": detail["livreur"], "livreur_nom": detail["livreur_nom"]})
+
+
+def attribuer_depuis_planning(choix: dict, livreur: dict, jour: date) -> None:
+    if choix["nature"] == "attente":
+        ok, res = api_brut("POST", f"/admin/tournees/{choix['id']}/attribuer", json={"livreur_id": livreur["id"]})
+    else:
+        ok, res = api_brut("POST", "/admin/tournees", json={
+            "livreur_id": livreur["id"], "clients": choix["ids"], "date_tournee": choix["date"],
+            "periode": choix["periode"], "remplacer": False})
+    if not ok:
+        st.error(f"Tournée non attribuée : {res}")
+        return
+    if choix["nature"] == "proposee":
+        st.session_state.setdefault("attribuees", {})[choix["numero"]] = livreur["nom"]
+        places = set(choix["ids"])
+        st.session_state.liste_repartition = [i for i in st.session_state.get("liste_repartition", [])
+                                              if i not in places]
+    st.session_state.pop("planning_choix", None)
+    avertissements = res.get("avertissements", []) if isinstance(res, dict) else []
+    if avertissements:
+        annoncer("warning", f"Tournée du {jour:%d/%m} attribuée à {livreur['nom']}, à vérifier : " + " ".join(avertissements))
+    annoncer("success", f"Tournée du {jour:%d/%m/%Y} ({choix['plage']}, {choix['nb']} clients) attribuée à "
+                        f"{livreur['nom']}. Elle apparaît dans son application.")
 
 
 # --------------------------------------------------------------------------- import CSV
@@ -1025,6 +1201,7 @@ def ecran_admin(profil: dict, outils_communs) -> None:
                                   label_visibility="collapsed") or ONGLETS[0]
     {
         "Tableau de bord": onglet_tableau_de_bord,
+        "Planning": onglet_planning,
         "Tournées du jour": onglet_tournees,
         "Import CSV": onglet_import,
         "Répartition": onglet_repartition,

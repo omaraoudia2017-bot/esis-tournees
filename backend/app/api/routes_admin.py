@@ -4,7 +4,7 @@ RGPD, tableau de bord, journal de sécurité.
 Le contrôle de rôle est appliqué à TOUT le routeur (un livreur reçoit 403 et sa tentative est
 journalisée). La logique est dans app/services/admin.py et app/services/import_csv.py.
 """
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
 from sqlalchemy import select
@@ -22,7 +22,7 @@ from app.schemas.admin import (ApercuClient, ApercuTourneeVue, BilanGeocodageVue
                                DemandeGeocodage, DemandeImport, DemandeReattribution, DemandeRepartition,
                                DemandeTournee,
                                DemandeTypeLivreur, DemandeVehicule, GroupeRepartition, LivreurDisponible,
-                               PropositionRepartition,
+                               PropositionRepartition, CasePlanning, LivreurPlanning, PlanningVue,
                                ReponseCompte, ReponseImport, RejetVue, TableauDeBordVue,
                                TourneeResume, VehiculeVue)
 from app.schemas.auth import EvenementJournal
@@ -31,6 +31,7 @@ from app.schemas.trajets import EtapePlanificateur, JourneePlanificateur
 from app.services import admin as service
 from app.services import import_csv
 from app.services import remarques as remarques_service
+from app.services import planning as planning_service
 from app.services import repartition as repartition_service
 from app.services import trajets as trajets_service
 from app.services.geocodage import Geocodeur
@@ -197,6 +198,36 @@ def _resumes(lignes) -> list[TourneeResume]:
 def lister_tournees(jour: date | None = Query(None, alias="date"), db: Session = Depends(get_db)):
     jour = jour or service.aujourdhui(get_settings())
     return _resumes(service.lister_tournees(db, jour))
+
+
+@router.get("/planning", response_model=PlanningVue)
+def planning(debut: date | None = None, jours: int = Query(7, ge=1, le=14), db: Session = Depends(get_db)):
+    """Planning des livreurs actifs : une case par livreur et par jour (tournée, journée de trajets
+    ou libre) + les tournées à attribuer. Par défaut : la semaine en cours (à partir du lundi)."""
+    aujourdhui = service.aujourdhui(get_settings())
+    debut = debut or aujourdhui - timedelta(days=aujourdhui.weekday())
+    p = planning_service.planning(db, debut, jours)
+    cases = [CasePlanning(
+        livreur_id=c.tournee.livreur_id, date=c.tournee.date_tournee, nature="tournee", tournee_id=c.tournee.id,
+        statut=c.tournee.statut.value, heure_depart=c.tournee.heure_depart, heure_fin=c.tournee.heure_fin,
+        zone=c.zone, nb_clients=c.nb_clients, nb_terminees=c.nb_terminees,
+        optimisee=c.tournee.optimisee_le is not None) for c in p.tournees]
+    occupees = {(c.livreur_id, c.date) for c in cases}
+    cases += [CasePlanning(livreur_id=j.livreur_id, date=j.date_journee, nature="trajets", nb_etapes=n,
+                           heure_depart=j.heure_depart, optimisee=j.optimisee_le is not None)
+              for j, n in p.trajets if (j.livreur_id, j.date_journee) not in occupees]
+    attente = _resumes(service.lister_tournees(db, None, en_attente_depuis=aujourdhui))
+    types = planning_service.types_camion_requis(db, [t.id for t in attente])
+    for t in attente:
+        t.type_camion_requis = types.get(t.id)
+    return PlanningVue(
+        debut=p.debut, fin=p.fin, jours=[p.debut + timedelta(days=k) for k in range(jours)],
+        livreurs=[LivreurPlanning(id=u.id, identifiant=u.identifiant, nom=f"{u.prenom} {u.nom}",
+                                  vehicule=v.immatriculation if v else None,
+                                  type_camion=v.type_camion.value if v else None,
+                                  type_livreur=u.type_livreur.value if u.type_livreur else None)
+                  for u, v in p.livreurs],
+        cases=cases, a_attribuer=attente)
 
 
 @router.post("/tournees/apercu", response_model=ApercuTourneeVue)

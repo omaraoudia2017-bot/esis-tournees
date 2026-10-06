@@ -76,6 +76,14 @@ passages dans le créneau du client, remplissage des tournées par rapport à la
 écart entre temps sur place estimé et réel (et comparaison avec les valeurs fixes), alertes de
 connexion, comptes verrouillés, courbe par jour et liste des tournées.
 
+**Planning** : grille des livreurs actifs (lignes) et des 7 jours de la semaine (colonnes), avec
+« Semaine précédente / suivante ». Chaque case montre la tournée du livreur (période, nombre de clients,
+prévue / en cours / terminée), sa journée de trajets, ou « libre ». En haut, les **tournées à
+attribuer** : celles dont l'attribution a été annulée et celles proposées dans « Répartition ».
+Choisir une tournée, puis cliquer sur « Attribuer » dans la colonne de son jour, sur la ligne d'un
+livreur libre équipé du bon camion. Cliquer sur une tournée du planning l'ouvre en dessous (carte,
+clients, changer de livreur, annuler l'attribution).
+
 **Tournées du jour**
 - Tableau des tournées du jour choisi (camion, zone, période, clients, pointés, à reporter, km).
 - « Suivre une tournée » : même carte et même liste que le livreur, en direct.

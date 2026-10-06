@@ -120,6 +120,7 @@ class TourneeResume(BaseModel):
     distance_totale_km: float | None
     attribuee_le: datetime | None = None       # date et heure à laquelle le planificateur l'a créée
     avertissements: list[str] = []             # faisabilité (à la création) : créneaux surchargés, départ
+    type_camion_requis: str | None = None      # tournées à attribuer : camion qu'exigent les clients
 
 
 class DemandeTournee(BaseModel):
@@ -265,3 +266,37 @@ class PropositionRepartition(BaseModel):
     groupes: list[GroupeRepartition]
     livreurs_disponibles: list[LivreurDisponible]
     exclus: list[ClientExclu]
+
+
+# --------------------------------------------------------------------------- planning des livreurs
+class LivreurPlanning(BaseModel):
+    id: int
+    identifiant: str
+    nom: str
+    vehicule: str | None
+    type_camion: str | None
+    type_livreur: str | None
+
+
+class CasePlanning(BaseModel):
+    livreur_id: int
+    date: date
+    nature: Literal["tournee", "trajets"]
+    tournee_id: int | None = None
+    statut: str | None = None
+    heure_depart: time | None = None
+    heure_fin: time | None = None
+    zone: str | None = None
+    nb_clients: int = 0
+    nb_terminees: int = 0
+    optimisee: bool = False
+    nb_etapes: int = 0                         # journée de trajets
+
+
+class PlanningVue(BaseModel):
+    debut: date
+    fin: date
+    jours: list[date]
+    livreurs: list[LivreurPlanning]
+    cases: list[CasePlanning]
+    a_attribuer: list[TourneeResume]           # tournées en attente d'un livreur (à venir)
