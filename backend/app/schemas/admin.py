@@ -228,7 +228,7 @@ class CasePlanning(BaseModel):
     nb_clients: int = 0
     nb_terminees: int = 0
     optimisee: bool = False
-    nb_etapes: int = 0                         # journée de trajets
+    nb_etapes: int = 0                         # journée de trajets (aussi possible un jour de tournée)
 
 
 class PlanningVue(BaseModel):

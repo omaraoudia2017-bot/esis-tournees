@@ -13,6 +13,8 @@ def test_planning_de_la_semaine(client, db, jeu):
     auj = aujourdhui(get_settings())
     b = db.scalar(select(Utilisateur).where(Utilisateur.identifiant == "test.livreur.b"))
     db.add(JourneeTrajets(livreur_id=b.id, date_journee=auj))           # B : journée de trajets, sans tournée
+    a = db.scalar(select(Utilisateur).where(Utilisateur.identifiant == "test.livreur.a"))
+    db.add(JourneeTrajets(livreur_id=a.id, date_journee=auj))           # A : trajets en plus de sa tournée
     db.commit()
 
     r = client.get("/admin/planning", headers=admin, params={"debut": auj.isoformat()})
@@ -22,17 +24,19 @@ def test_planning_de_la_semaine(client, db, jeu):
     livreurs = {l["identifiant"]: l for l in p["livreurs"]}
     assert {"test.livreur.a", "test.livreur.b"} <= set(livreurs) and "test.admin.j7" not in livreurs
     assert livreurs["test.livreur.a"]["vehicule"] == "TEST-J7-N1"
+    assert len([c for c in p["cases"] if c["livreur_id"] == a.id and c["date"] == auj.isoformat()]) == 1
     cases = {(c["livreur_id"], c["date"]): c for c in p["cases"]}
     a_case = cases[(livreurs["test.livreur.a"]["id"], auj.isoformat())]
     assert a_case["nature"] == "tournee" and a_case["nb_clients"] == 5 and a_case["tournee_id"] == jeu["tournee"].id
     assert cases[(b.id, auj.isoformat())]["nature"] == "trajets"
 
-    # Attribution annulée : la case de A se libère, les clients rejoignent une tournée L à attribuer,
-    # avec le camion qu'exigent ses clients (un client palette -> hayon)
+    # Attribution annulée : la tournée quitte la case de A (il garde sa journée de trajets), les clients
+    # rejoignent une tournée L à attribuer, avec le camion qu'exigent ses clients (un client palette -> hayon)
     r = client.post(f"/admin/tournees/{jeu['tournee'].id}/desattribuer", headers=admin)
     assert r.status_code == 200
     p = client.get("/admin/planning", headers=admin, params={"debut": auj.isoformat()}).json()
-    assert (livreurs["test.livreur.a"]["id"], auj.isoformat()) not in {(c["livreur_id"], c["date"]) for c in p["cases"]}
+    cases_a = [c for c in p["cases"] if c["livreur_id"] == a.id and c["date"] == auj.isoformat()]
+    assert [c["nature"] for c in cases_a] == ["trajets"]
     attente = next(t for t in p["a_attribuer"] if t["id"] == r.json()["id"])
     assert attente["type_camion"] == "hayon" and attente["code"].startswith("L") and attente["nb_clients"] == 5
 

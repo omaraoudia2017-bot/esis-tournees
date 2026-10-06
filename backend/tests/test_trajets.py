@@ -105,13 +105,17 @@ def test_journee_saisie_optimisee_et_pointee(client, db, jeu, entetes, geo):
     assert db.scalar(select(func.count()).select_from(Livraison)) == livraisons_avant
 
 
-def test_refuse_quand_une_tournee_est_attribuee(client, db, jeu, entetes, geo):
+def test_trajets_en_parallele_d_une_tournee(client, db, jeu, entetes, geo):
+    # A a une tournée aujourd'hui : il peut quand même organiser des trajets à côté (page séparée)
     assert client.get("/trajets/du-jour", headers=entetes["a"]).json()["tournee_attribuee"] is True
     r = client.post("/trajets/du-jour/etapes", json=GARAGE, headers=entetes["a"])
-    assert r.status_code == 409 and geo.appels == 0
+    assert r.status_code == 201, r.text
     assert client.put("/trajets/du-jour/reglages", json={"depart": "depot", "retour": "depot", "heure_depart": "08:00"},
-                      headers=entetes["a"]).status_code == 409
-    assert client.post("/trajets/du-jour/optimiser", headers=entetes["a"]).status_code == 409
+                      headers=entetes["a"]).status_code == 200
+    assert client.post("/trajets/du-jour/optimiser", headers=entetes["a"]).status_code == 200
+    # La tournée n'est pas touchée
+    vue = client.get("/tournees/du-jour", headers=entetes["a"]).json()
+    assert vue["id"] == jeu["tournee"].id and len(vue["livraisons"]) == 5
 
 
 def test_cloisonnement_chiffrement_et_journal(client, db, jeu, entetes, geo):

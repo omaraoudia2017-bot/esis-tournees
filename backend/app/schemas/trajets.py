@@ -49,7 +49,7 @@ class EtapeVue(BaseModel):
 
 class JourneeVue(BaseModel):
     date_journee: date
-    tournee_attribuee: bool                  # vrai : la tournée fait foi, la saisie est fermée
+    tournee_attribuee: bool                  # information : une tournée est aussi prévue ce jour-là
     depart: str = "depot"
     retour: str = "depot"
     heure_depart: time = time(8, 0)

@@ -329,6 +329,12 @@ def onglet_planning() -> None:
                     st.session_state.planning_detail = {**case, "livreur": l["identifiant"], "livreur_nom": l["nom"]}
                     st.session_state.pop("planning_trajets", None)
                     st.rerun()
+                if case["nb_etapes"] and col.button(f":violet[+ trajets · {case['nb_etapes']}]", key=cle + "_t",
+                                                    width="stretch", icon=":material/route:",
+                                                    help="Trajets saisis par le livreur en plus de sa tournée."):
+                    st.session_state.planning_trajets = (j.isoformat(), l["nom"])
+                    st.session_state.pop("planning_detail", None)
+                    st.rerun()
             elif case:
                 if col.button(f":violet[Trajets · {case['nb_etapes']}]", key=cle, width="stretch",
                               icon=":material/route:", help="Journée de trajets saisie par le livreur : voir les étapes."):

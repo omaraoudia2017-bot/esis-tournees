@@ -25,7 +25,7 @@ const etat = {
   ecran: "connexion", jeton: null, preauth: null, expireLe: null, profil: null, tournee: null,
   message: null, messageConnexion: null, enrolement: null, codesSecours: null, conditions: null,
   lectureConditions: false, issue: {}, remarqueOuverte: null, occupe: false, calcul: false, domicile: null,
-  trajets: null, aSupprimer: null, calendrier: null, tourneeConsultee: null,
+  trajets: null, aSupprimer: null, calendrier: null, tourneeConsultee: null, jourConsulte: null,
 };
 const POINTS = { depot: "Dépôt", domicile: "Domicile" };
 const IDEES_ETAPES = ["Garage", "Contrôle technique", "Récupérer une pièce", "Station de lavage"];
@@ -144,12 +144,10 @@ async function chargerTournee() {
   const r = await appel("GET", "/tournees/du-jour");
   if (!r) return;
   etat.tournee = r.status === 200 ? r.data : null;
-  if (r.status === 404) {
-    // Pas de tournée aujourd'hui : on regarde si le livreur a préparé une journée de trajets
-    const tr = await appel("GET", "/trajets/du-jour");
-    if (!tr) return;
-    etat.trajets = tr.status === 200 ? tr.data : null;
-  }
+  // Journée de trajets (garage, pièce…) : possible avec ou sans tournée, sur une page à part
+  const tr = await appel("GET", "/trajets/du-jour");
+  if (!tr) return;
+  etat.trajets = tr.status === 200 ? tr.data : null;
   etat.ecran = "tournee";
   if (r.status !== 200 && r.status !== 404) annoncer("erreur", r.detail);
   rendre();
@@ -160,11 +158,6 @@ async function chargerTrajets() {
   if (!r) return;
   if (r.status !== 200) { annoncer("erreur", r.detail); await chargerTournee(); return; }
   etat.trajets = r.data;
-  if (r.data.tournee_attribuee) {
-    annoncer("info", "Une tournée vous a été attribuée aujourd'hui : elle remplace vos trajets.");
-    await chargerTournee();
-    return;
-  }
   etat.ecran = "trajets";
   rendre();
 }
@@ -465,9 +458,9 @@ function ecranMenu() {
       p.conditions_acceptees_le ? h("div", { classe: "petit", texte: "Conditions v" + p.conditions_version + " acceptées le " + dateCourte(p.conditions_acceptees_le) }) : null),
     p.type_livreur === "interne" ? h("button", { type: "button", classe: "btn btn-menu", texte: "Mon adresse de départ et de retour", onclick: ouvrirDomicile }) : null,
     h("button", { type: "button", classe: "btn btn-menu", texte: "Relire les conditions et mes données", onclick: () => ouvrirConditions(true) }),
-    h("button", { type: "button", classe: "btn btn-menu", texte: "Actualiser ma tournée", onclick: chargerTournee }),
+    h("button", { type: "button", classe: "btn btn-menu", texte: "Ma tournée du jour", onclick: () => { etat.message = null; chargerTournee(); } }),
     h("button", { type: "button", classe: "btn btn-menu", texte: "Mes tournées : passées et à venir", onclick: ouvrirCalendrier }),
-    !t ? h("button", { type: "button", classe: "btn btn-menu", texte: "Mes trajets de la journée", onclick: () => { etat.message = null; chargerTrajets(); } }) : null,
+    h("button", { type: "button", classe: "btn btn-menu", texte: "Organiser ma journée (trajets)", onclick: () => { etat.message = null; chargerTrajets(); } }),
     h("button", { type: "button", classe: "btn btn-menu btn-danger", texte: "Se déconnecter", onclick: async () => {
       await api("POST", "/auth/deconnexion");
       deconnexionLocale("Vous êtes déconnecté.");
@@ -541,7 +534,8 @@ function ecranTournee() {
       icone(["M4 7h16", "M4 12h16", "M4 17h16"])));
 
   const corps = h("div", { classe: "defilement" });
-  corps.append(boiteMessage(etat.message, () => { etat.message = null; rendre(); }) || "");
+  corps.append(boiteMessage(etat.message, () => { etat.message = null; rendre(); }) || "", barreJours(aujourdhuiISO()));
+  const ecran = (...blocs) => h("div", { classe: "ecran" }, entete, ongletsJour("tournee"), ...blocs);
   if (!t) {
     const j = etat.trajets;
     const nb = j ? j.etapes.length : 0;
@@ -552,10 +546,9 @@ function ecranTournee() {
         h("div", { classe: "petit", texte: nb
           ? nb + " étape(s) prévue(s), " + restantes + " restante(s)" + (j.optimisee_le ? " · itinéraire optimisé" : " · pas encore optimisé") + "."
           : "Garage, contrôle technique, récupération d'une pièce… Saisissez vos adresses et l'application calcule le meilleur ordre de passage en respectant vos rendez-vous." }),
-        h("button", { type: "button", classe: "btn btn-principal", texte: nb ? "Mes trajets de la journée" : "Organiser mes trajets de la journée", onclick: () => { etat.message = null; chargerTrajets(); } })),
-      h("button", { type: "button", classe: "btn btn-contour", texte: "Mes tournées passées et à venir", onclick: ouvrirCalendrier }),
+        h("button", { type: "button", classe: "btn btn-principal", texte: "Organiser ma journée", onclick: () => { etat.message = null; chargerTrajets(); } })),
       h("button", { type: "button", classe: "btn", texte: "Actualiser", onclick: chargerTournee }));
-    return h("div", { classe: "ecran" }, entete, corps);
+    return ecran(corps);
   }
 
   const livraisons = t.livraisons;
@@ -635,7 +628,47 @@ function ecranTournee() {
     reportees.forEach((l) => corps.append(carteLivraison(l, false, false)));
   }
   corps.append(h("p", { classe: "tres-petit", texte: "Le pointage sert à améliorer l'estimation des temps de livraison, pas à évaluer votre performance individuelle." }));
-  return h("div", { classe: "ecran" }, entete, corps);
+  return ecran(corps);
+}
+
+// ---------------- navigation : « Ma tournée » / « Organiser ma journée », et choix du jour
+function ongletsJour(actif) {
+  const j = etat.trajets;
+  const restantes = j ? j.etapes.filter((e) => !e.faite_le).length : 0;
+  const onglet = (cle, libelle, ouvrir) => h("button", { type: "button", role: "tab", "aria-selected": actif === cle ? "true" : "false",
+    classe: "onglet" + (actif === cle ? " actif" : ""), texte: libelle,
+    onclick: () => { if (actif !== cle) { etat.message = null; ouvrir(); } } });
+  return h("div", { classe: "onglets", role: "tablist", "aria-label": "Ma journée" },
+    onglet("tournee", "Ma tournée", chargerTournee),
+    onglet("trajets", "Organiser ma journée" + (restantes ? " (" + restantes + ")" : ""), chargerTrajets));
+}
+
+function decalerJour(iso, n) {
+  const d = new Date(iso + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+function barreJours(jour) {
+  const auj = aujourdhuiISO();
+  const demain = decalerJour(auj, 1);
+  const champ = h("input", { type: "date", id: "choix-jour", value: jour, "aria-label": "Choisir une date",
+    onchange: (ev) => {
+      const v = ev.target.value;                         // saisie au clavier : on attend une année complète
+      if (v && v.slice(0, 4) >= "2020" && v.slice(0, 4) <= "2100" && v !== jour) ouvrirTourneeDate(v);
+    } });
+  const puce = (libelle, j) => h("button", { type: "button", classe: "puce" + (j === jour ? " actif" : ""), texte: libelle,
+    "aria-pressed": j === jour ? "true" : "false", onclick: () => { if (j !== jour) ouvrirTourneeDate(j); } });
+  return h("div", { classe: "barre-jours" },
+    h("div", { classe: "navigation-jours" },
+      h("button", { type: "button", classe: "btn-icone", "aria-label": "Jour précédent", onclick: () => ouvrirTourneeDate(decalerJour(jour, -1)) },
+        icone(["M15 5l-7 7 7 7"])),
+      champ,
+      h("button", { type: "button", classe: "btn-icone", "aria-label": "Jour suivant", onclick: () => ouvrirTourneeDate(decalerJour(jour, 1)) },
+        icone(["M9 5l7 7-7 7"]))),
+    h("div", { classe: "puces" },
+      puce("Aujourd'hui", auj), puce("Demain", demain),
+      h("button", { type: "button", classe: "puce", texte: "Toutes mes tournées", onclick: ouvrirCalendrier })));
 }
 
 async function optimiser() {
@@ -862,11 +895,9 @@ function cleDuPoint(p) { return p.nom === "Domicile" ? "domicile" : "depot"; }
 function ecranTrajets() {
   const j = etat.trajets;
   const entete = h("div", { classe: "entete" },
-    h("button", { type: "button", classe: "btn-icone", "aria-label": "Retour à l'accueil", onclick: chargerTournee },
-      icone(["M15 5l-7 7 7 7"])),
     h("div", { style: { flex: "1" } },
-      h("div", { classe: "titre", texte: "Mes trajets du jour" }),
-      h("div", { classe: "sous-titre", texte: new Date(j.date_journee + "T12:00:00").toLocaleDateString("fr-FR") + " · journée sans tournée" })),
+      h("div", { classe: "titre", texte: "Organiser ma journée" }),
+      h("div", { classe: "sous-titre", texte: new Date(j.date_journee + "T12:00:00").toLocaleDateString("fr-FR") + (j.tournee_attribuee ? " · en plus de votre tournée" : " · journée sans tournée") })),
     h("button", { type: "button", classe: "btn-icone", "aria-label": "Ouvrir le menu", onclick: () => { etat.ecran = "menu"; rendre(); } },
       icone(["M4 7h16", "M4 12h16", "M4 17h16"])));
 
@@ -877,6 +908,9 @@ function ecranTrajets() {
   const faites = etapes.filter((e) => e.faite_le);
   const numero = (e) => etapes.indexOf(e) + 1;
 
+  if (j.tournee_attribuee) {
+    corps.append(h("div", { classe: "itineraire info", texte: "Vous avez aussi une tournée aujourd'hui. Les trajets saisis ici (garage, pièce à récupérer…) sont calculés à part : ils ne modifient pas l'itinéraire de la tournée." }));
+  }
   corps.append(blocReglages(j));
 
   const indicateur = (libelle, valeur) => h("div", { classe: "indicateur" }, h("div", { classe: "libelle", texte: libelle }), h("div", { classe: "valeur", texte: valeur }));
@@ -908,7 +942,7 @@ function ecranTrajets() {
   if (faites.length) corps.append(h("h2", { classe: "section", texte: "Faites (" + faites.length + ")" }));
   faites.forEach((e) => corps.append(carteEtape(e, numero(e), false)));
   corps.append(h("p", { classe: "tres-petit", texte: "Vos étapes sont visibles par le planificateur, en consultation seulement. L'adresse de votre domicile ne lui est jamais montrée." }));
-  return h("div", { classe: "ecran" }, entete, corps);
+  return h("div", { classe: "ecran" }, entete, ongletsJour("trajets"), corps);
 }
 
 function blocReglages(j) {
@@ -1096,12 +1130,13 @@ async function ouvrirCalendrier() {
 }
 
 async function ouvrirTourneeDate(jour) {
-  if (jour === aujourdhuiISO()) { etat.message = null; await chargerTournee(); return; }
+  etat.message = null;
+  if (jour === aujourdhuiISO()) { await chargerTournee(); return; }
   const r = await appel("GET", "/tournees/date/" + jour);
   if (!r) return;
-  if (r.status !== 200) { annoncer("info", r.detail); etat.ecran = "calendrier"; rendre(); return; }
-  etat.tourneeConsultee = r.data;
-  etat.message = null;
+  if (r.status !== 200 && r.status !== 404) annoncer("erreur", r.detail);
+  etat.jourConsulte = jour;
+  etat.tourneeConsultee = r.status === 200 ? r.data : null;   // 404 : pas de tournée ce jour-là
   etat.ecran = "tourneeDate";
   rendre();
 }
@@ -1155,7 +1190,16 @@ function ecranCalendrier() {
 
 function ecranTourneeDate() {
   const t = etat.tourneeConsultee;
+  const jour = etat.jourConsulte || (t && t.date_tournee);
   const corps = h("div", { classe: "defilement" });
+  corps.append(boiteMessage(etat.message, () => { etat.message = null; rendre(); }) || "", barreJours(jour));
+  const retour = () => { etat.message = null; chargerTournee(); };
+  if (!t) {
+    corps.append(boiteMessage({ type: "info", texte: jour > aujourdhuiISO()
+      ? "Aucune tournée ne vous est attribuée pour l'instant ce jour-là. Le planificateur peut encore en ajouter : revenez voir plus tard."
+      : "Aucune tournée ce jour-là." }));
+    return h("div", { classe: "ecran" }, enteteRetour(dateLongue(jour), "Pas de tournée", retour), corps);
+  }
   const livres = t.livraisons.filter((l) => l.statut === "livre").length;
   if (t.consultation_seule) {
     corps.append(boiteMessage({ type: "info", texte: t.date_tournee > aujourdhuiISO()
@@ -1185,7 +1229,7 @@ function ecranTourneeDate() {
       h("div", { classe: "adresse", texte: c.adresse }),
       h("div", { classe: "petit", texte: infos.join(" · ") })));
   });
-  return h("div", { classe: "ecran" }, enteteRetour(dateLongue(t.date_tournee), (t.zone || "—") + " · camion " + (t.vehicule || "—"), ouvrirCalendrier), corps);
+  return h("div", { classe: "ecran" }, enteteRetour(dateLongue(t.date_tournee), (t.zone || "—") + " · camion " + (t.vehicule || "—"), retour), corps);
 }
 
 // --------------------------------------------------------------------------- démarrage

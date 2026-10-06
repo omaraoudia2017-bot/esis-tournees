@@ -56,8 +56,6 @@ def journee_du_jour(db: Session, livreur: Utilisateur, reglages: Settings, creer
     jour = aujourdhui(reglages)
     journee = db.scalar(select(JourneeTrajets).where(JourneeTrajets.livreur_id == livreur.id,
                                                      JourneeTrajets.date_journee == jour))
-    if creer and a_une_tournee(db, livreur, jour):     # modification : jamais si une tournée est attribuée
-        raise ErreurTrajets(409, "Une tournée vous est attribuée aujourd'hui : vos trajets sont ceux de la tournée.")
     if journee is None and creer:
         journee = JourneeTrajets(livreur_id=livreur.id, date_journee=jour)
         db.add(journee)

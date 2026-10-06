@@ -212,10 +212,13 @@ def planning(debut: date | None = None, jours: int = Query(7, ge=1, le=14), db: 
         statut=c.tournee.statut.value, heure_depart=c.tournee.heure_depart, heure_fin=c.tournee.heure_fin,
         zone=c.zone, nb_clients=c.nb_clients, nb_terminees=c.nb_terminees,
         optimisee=c.tournee.optimisee_le is not None) for c in p.tournees]
-    occupees = {(c.livreur_id, c.date) for c in cases}
-    cases += [CasePlanning(livreur_id=j.livreur_id, date=j.date_journee, nature="trajets", nb_etapes=n,
-                           heure_depart=j.heure_depart, optimisee=j.optimisee_le is not None)
-              for j, n in p.trajets if (j.livreur_id, j.date_journee) not in occupees]
+    occupees = {(c.livreur_id, c.date): c for c in cases}
+    for j, n in p.trajets:                      # trajets un jour de tournée : indiqués dans la case tournée
+        if (j.livreur_id, j.date_journee) in occupees:
+            occupees[(j.livreur_id, j.date_journee)].nb_etapes = n
+        else:
+            cases.append(CasePlanning(livreur_id=j.livreur_id, date=j.date_journee, nature="trajets", nb_etapes=n,
+                                      heure_depart=j.heure_depart, optimisee=j.optimisee_le is not None))
     tournees_l_service.convertir_en_attente(db, get_settings())
     attente = [_vue_l(db, l) for l in tournees_l_service.a_attribuer(db)]
     return PlanningVue(

@@ -32,9 +32,15 @@ informatique.
 
 ## 2. Livreur : ma tournée du jour
 
-**Mes tournées passées et à venir** (menu) : calendrier des tournées des 60 derniers et 30 prochains
-jours, ou d'une date choisie. Une tournée d'un autre jour s'ouvre en consultation seule : carte,
-clients et résultats, sans digicode, téléphone ni notes (affichés seulement le jour même).
+**Deux onglets** en haut de l'écran : **Ma tournée** et **Organiser ma journée** (trajets personnels :
+garage, contrôle technique, pièce à récupérer… avec ou sans tournée ce jour-là ; l'application calcule
+leur meilleur ordre à part, sans toucher à l'itinéraire de la tournée).
+
+**Choisir un jour** : sous les onglets, les flèches (jour précédent / suivant), le champ date et les
+raccourcis « Aujourd'hui » et « Demain » affichent la tournée de n'importe quel jour ;
+« Toutes mes tournées » liste celles des 60 derniers et 30 prochains jours. Une tournée d'un autre jour
+s'ouvre en consultation seule : carte, clients et résultats, sans digicode, téléphone ni notes
+(affichés seulement le jour même).
 
 **L'écran** affiche la date, le camion, la zone et la période de la tournée, le nombre de livraisons
 faites, la distance et l'heure de retour prévue, une carte et la liste des clients.
@@ -89,7 +95,8 @@ Cinq rubriques en haut de l'écran : Tournées, Planning, Livreurs, Clients, Tab
    livreur, qui l'optimise (ordre géographique). « Supprimer » retire une tournée L inutile.
 
 **Planning** : grille des livreurs actifs (lignes) et des 7 jours de la semaine (colonnes). Chaque case
-montre la tournée du livreur (période, clients ; prévue, en cours ou terminée), sa journée de trajets ou
+montre la tournée du livreur (période, clients ; prévue, en cours ou terminée), sa journée de trajets
+(« + trajets » si le livreur en a saisi en plus de sa tournée) ou
 « libre ». Choisir une tournée L en haut, puis cliquer sur « Attribuer » le jour voulu sur la ligne d'un
 livreur libre (période et départ par défaut). Cliquer sur une tournée l'ouvre en dessous : carte,
 clients, pointages en direct, « Donner la tournée à » un autre livreur, « Annuler l'attribution » (ses

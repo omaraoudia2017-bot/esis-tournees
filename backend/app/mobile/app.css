@@ -209,3 +209,13 @@ button:disabled { cursor: not-allowed; }
 .carte-jour { text-align: left; font: inherit; color: inherit; cursor: pointer; width: 100%; }
 .carte-jour .nom::first-letter { text-transform: uppercase; }
 .carte-jour:hover { border-color: var(--bleu); }
+
+/* ---------- onglets « Ma tournée » / « Organiser ma journée » et choix du jour ---------- */
+.onglets { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 8px 14px; background: var(--fond); border-bottom: 1px solid #E2DED4; flex-shrink: 0; }
+.onglet { min-height: 42px; border: 1px solid var(--bord); border-radius: 12px; background: #FFFFFF; color: var(--gris-fonce); font-size: 14px; font-weight: 600; padding: 0 8px; }
+.onglet.actif { background: var(--bleu); border-color: var(--bleu); color: #FFFFFF; }
+.barre-jours { display: flex; flex-direction: column; gap: 8px; }
+.navigation-jours { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; gap: 8px; align-items: center; }
+.navigation-jours input[type="date"] { height: 44px; text-align: center; }
+.barre-jours .puces { margin-top: 0; }
+.puce.actif { background: var(--bleu-clair); border-color: var(--bleu); color: var(--bleu); font-weight: 600; }

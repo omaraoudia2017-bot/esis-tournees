@@ -78,8 +78,8 @@ def journee_du_jour(u: Utilisateur = Depends(livreur_connecte), db: Session = De
 @router.post("/trajets/du-jour/etapes", response_model=ReponseEtape, status_code=201)
 def ajouter_etape(demande: DemandeEtape, request: Request, u: Utilisateur = Depends(livreur_connecte),
                   db: Session = Depends(get_db), geo: Geocodeur = Depends(geocodeur)):
-    """Nouvelle étape (libellé, adresse, rendez-vous facultatif, durée). Refusé si une tournée est
-    attribuée aujourd'hui. Appuyer ensuite sur « Optimiser » pour l'intégrer."""
+    """Nouvelle étape (libellé, adresse, rendez-vous facultatif, durée), possible aussi un jour de
+    tournée (trajets en parallèle). Appuyer ensuite sur « Optimiser » pour l'intégrer."""
     try:
         etape, avertissement = service.ajouter_etape(db, u, service.NouvelleEtape(**demande.model_dump()),
                                                      geo, get_settings(), contexte_depuis(request))
