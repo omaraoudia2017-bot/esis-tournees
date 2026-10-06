@@ -77,7 +77,8 @@ def couper(clients: list[Client], limite: int, reglages: Settings) -> list[list[
 
 def livreurs_disponibles(db: Session, jour: date) -> list[tuple[Utilisateur, Vehicule]]:
     """Livreurs actifs, avec un camion actif, sans tournée ce jour-là."""
-    occupes = select(Tournee.livreur_id).where(Tournee.date_tournee == jour)
+    # (NOT IN avec un NULL ne renverrait aucune ligne : les tournées en attente sont écartées)
+    occupes = select(Tournee.livreur_id).where(Tournee.date_tournee == jour, Tournee.livreur_id.is_not(None))
     return db.execute(
         select(Utilisateur, Vehicule).join(Vehicule, Vehicule.id == Utilisateur.vehicule_id)
         .where(Utilisateur.role == RoleUtilisateur.LIVREUR, Utilisateur.actif.is_(True),

@@ -91,7 +91,7 @@ p { margin: 0; }
 
 /* ---------- formulaires ---------- */
 label.champ { display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 500; }
-input[type="text"], input[type="password"], input[type="time"], input[type="number"], textarea {
+input[type="text"], input[type="password"], input[type="time"], input[type="number"], input[type="date"], textarea {
   height: 48px; border: 1px solid var(--bord-fort); border-radius: 12px; padding: 0 14px;
   font-size: 16px; background: #FFFFFF; color: var(--encre); font-family: inherit; width: 100%; min-width: 0;
 }
@@ -204,3 +204,8 @@ button:disabled { cursor: not-allowed; }
 /* ---------- première connexion : règles du mot de passe ---------- */
 .regles { list-style: none; margin: 0; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--gris); background: #FFFFFF; border: 1px solid var(--bord); border-radius: 12px; }
 .regles .regle-ok { color: var(--vert); font-weight: 600; }
+
+/* ---------- calendrier des tournées ---------- */
+.carte-jour { text-align: left; font: inherit; color: inherit; cursor: pointer; width: 100%; }
+.carte-jour .nom::first-letter { text-transform: uppercase; }
+.carte-jour:hover { border-color: var(--bleu); }

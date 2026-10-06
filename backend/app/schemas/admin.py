@@ -104,8 +104,8 @@ class DemandeGeocodage(BaseModel):
 class TourneeResume(BaseModel):
     id: int
     date_tournee: date
-    livreur: str
-    livreur_nom: str
+    livreur: str | None                        # None : tournée en attente d'un livreur
+    livreur_nom: str | None
     vehicule: str | None
     type_camion: str | None
     zone: str | None
@@ -127,6 +127,10 @@ class DemandeTournee(BaseModel):
     date_tournee: date | None = None
     periode: Literal["matin", "apres-midi", "soiree", "journee"] = "matin"
     remplacer: bool = False
+
+
+class DemandeReattribution(BaseModel):
+    livreur_id: int
 
 
 class DemandeAjoutExistant(BaseModel):
@@ -198,6 +202,14 @@ class ClientRepartition(BaseModel):
     creneau_debut: time | None
     creneau_fin: time | None
     type_camion_requis: str
+
+
+class ApercuClient(ClientRepartition):
+    localise: bool
+
+
+class DemandeApercu(BaseModel):
+    clients: list[str] = Field(min_length=1, max_length=500)
 
 
 class GroupeRepartition(BaseModel):

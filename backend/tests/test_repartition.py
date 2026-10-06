@@ -113,6 +113,11 @@ def test_journee_complete_et_controles(client, db, jeu, admin, liste):
     assert client.post("/admin/repartition", headers=admin, json={"clients": []}).status_code == 422
     livreur = entete(connecter(client, "test.livreur.b", jeu["secrets"]["b"]))
     assert client.post("/admin/repartition", headers=livreur, json={"clients": liste}).status_code == 403
+    # Aperçu (grille code postal x heures) : code postal et créneau, sans adresse ni contact
+    apercu = client.post("/admin/repartition/apercu", headers=admin, json={"clients": liste + ["0000000000"]}).json()
+    assert len(apercu) == len(liste) and {"69997", "69998"} <= {c["code_postal"] for c in apercu}
+    assert all(c["localise"] for c in apercu) and "adresse" not in apercu[0] and "digicode" not in apercu[0]
+    assert client.post("/admin/repartition/apercu", headers=livreur, json={"clients": liste}).status_code == 403
     # Recherche de clients par code postal (pour compléter la liste)
     trouves = client.get("/admin/clients", headers=admin, params={"recherche": "69998", "limite": 100}).json()
     assert {c["id_client"] for c in trouves} >= set(liste[15:25])

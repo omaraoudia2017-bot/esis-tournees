@@ -83,6 +83,8 @@ MIGRATIONS = [
     # Activation du compte : code à usage unique, mot de passe choisi par l'utilisateur
     "ALTER TABLE utilisateurs ADD COLUMN IF NOT EXISTS mdp_a_definir BOOLEAN NOT NULL DEFAULT false",
     "ALTER TABLE utilisateurs ADD COLUMN IF NOT EXISTS activation_expire_le TIMESTAMPTZ",
+    # Tournée « en attente » : attribution annulée, sans livreur jusqu'à la nouvelle attribution
+    "ALTER TABLE tournees ALTER COLUMN livreur_id DROP NOT NULL",
 ]
 
 # Une instruction SQL par élément (exécutées une à une)

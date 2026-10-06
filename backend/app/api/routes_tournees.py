@@ -1,6 +1,6 @@
 """Routes du livreur : tournée du jour, bouton « Optimiser », pointage Démarrer / Terminer,
 annulation du dernier clic, ajout d'une adresse en cours de tournée, remarques sur une adresse."""
-from datetime import timedelta
+from datetime import date, timedelta
 from functools import lru_cache
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -15,7 +15,7 @@ from app.optim.probleme import en_heure
 from app.schemas.tournee import (AnnulationPossible, ClientVue, DemandeAjoutClient, DemandeDomicile,
                                  DemandeFin, DemandeRemarque, DomicileVue, LivraisonVue, Point,
                                  RemarqueVue, ReponseAjout, ReponseAnnulation, ReponseOptimisation,
-                                 TourneeVue)
+                                 TourneeLivreurResume, TourneeVue)
 from app.services import domicile as domicile_service
 from app.services import remarques as remarques_service
 from app.services import tournees as service
@@ -81,9 +81,9 @@ def vue_tournee(db: Session, t: Tournee, lecteur_id: int | None = None) -> Tourn
     zone = db.get(Zone, t.zone_id) if t.zone_id else None
     vehicule = db.get(Vehicule, t.vehicule_id) if t.vehicule_id else None
     depart_s, fin_s = service.bornes_horaires(t, reglages)
-    livreur = db.get(Utilisateur, t.livreur_id)
-    retour, colis = service.retour_prevu(db, t, livreur)
-    trajet = domicile_service.trajet_domicile_depot(livreur, reglages)
+    livreur = db.get(Utilisateur, t.livreur_id) if t.livreur_id else None     # None : tournée en attente
+    retour, colis = service.retour_prevu(db, t, livreur) if livreur else ("depot", 0)
+    trajet = domicile_service.trajet_domicile_depot(livreur, reglages) if livreur else None
     # Le domicile n'est montré qu'au livreur lui-même (le suivi administrateur ne l'affiche pas)
     point_domicile = domicile_service.position_domicile(livreur) if lecteur_id == t.livreur_id else None
     return TourneeVue(
@@ -129,6 +129,41 @@ def tournee_du_jour(request: Request, u: Utilisateur = Depends(livreur_connecte)
         raise _http(e) from None
     tracer_consultation(db, u, contexte_depuis(request), tournee.id)
     return vue_tournee(db, tournee, lecteur_id=u.id)
+
+
+@router.get("/tournees/mes-tournees", response_model=list[TourneeLivreurResume])
+def mes_tournees(du: date | None = None, au: date | None = None, u: Utilisateur = Depends(livreur_connecte),
+                 db: Session = Depends(get_db)):
+    """Calendrier du livreur : ses tournées passées et à venir (par défaut 60 jours avant,
+    30 jours après aujourd'hui ; un an au plus)."""
+    aujourdhui = service.aujourdhui(get_settings())
+    du, au = du or aujourdhui - timedelta(days=60), au or aujourdhui + timedelta(days=30)
+    if au < du or (au - du).days > 366:
+        raise HTTPException(422, "Période invalide (un an au plus).")
+    return [TourneeLivreurResume(
+        id=t.id, date_tournee=t.date_tournee, statut=t.statut.value, zone=zone, heure_depart=t.heure_depart,
+        heure_fin=t.heure_fin, nb_clients=nb or 0, nb_livres=livres or 0, nb_non_livres=non_livres or 0,
+        distance_totale_km=float(t.distance_totale_km) if t.distance_totale_km is not None else None,
+        optimisee=t.optimisee_le is not None)
+        for t, zone, nb, livres, non_livres in service.tournees_du_livreur(db, u, du, au)]
+
+
+@router.get("/tournees/date/{jour}", response_model=TourneeVue)
+def tournee_a_la_date(jour: date, request: Request, u: Utilisateur = Depends(livreur_connecte),
+                      db: Session = Depends(get_db)):
+    """Tournée du livreur connecté à une date donnée. Aujourd'hui : vue complète (comme
+    /tournees/du-jour). Autre jour : consultation seule, sans digicode, téléphone ni notes."""
+    tournee = service.tournee_du_livreur_le(db, u, jour)
+    if tournee is None:
+        raise HTTPException(404, f"Aucune tournée le {jour:%d/%m/%Y}.")
+    if jour == service.aujourdhui(get_settings()):
+        tracer_consultation(db, u, contexte_depuis(request), tournee.id)
+        return vue_tournee(db, tournee, lecteur_id=u.id)
+    vue = vue_tournee(db, tournee, lecteur_id=u.id)
+    for l in vue.livraisons:
+        l.client.telephone = l.client.digicode = l.client.notes_livraison = None
+    vue.annulation_possible, vue.consultation_seule = None, True
+    return vue
 
 
 @router.post("/tournees/du-jour/optimiser", response_model=ReponseOptimisation)

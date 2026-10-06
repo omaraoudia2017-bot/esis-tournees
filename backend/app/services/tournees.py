@@ -20,7 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.models import Client, Livraison, Tournee, Utilisateur, Vehicule
+from app.models import Client, Livraison, Tournee, Utilisateur, Vehicule, Zone
 from app.models.enums import (PrecisionGeocodage, SourceClient, StatutLivraison, StatutTournee,
                               TypeCamion, TypeClient)
 from app.optim.cvrptw import optimiser_tournees
@@ -60,6 +60,23 @@ def tournee_du_jour(db: Session, livreur: Utilisateur, reglages: Settings) -> To
     if tournee is None:
         raise ErreurTournee(404, "Aucune tournée ne vous est attribuée aujourd'hui.")
     return tournee
+
+
+def tournee_du_livreur_le(db: Session, livreur: Utilisateur, jour: date) -> Tournee | None:
+    return db.scalar(select(Tournee).where(Tournee.livreur_id == livreur.id, Tournee.date_tournee == jour))
+
+
+def tournees_du_livreur(db: Session, livreur: Utilisateur, du: date, au: date):
+    """(tournée, zone, nb clients, nb livrés, nb non livrés) entre deux dates, du plus récent au plus ancien."""
+    nb = (select(Livraison.tournee_id, func.count().label("nb"),
+                 func.count().filter(Livraison.statut == StatutLivraison.LIVRE).label("livres"),
+                 func.count().filter(Livraison.statut.in_(NON_LIVRES)).label("non_livres"))
+          .group_by(Livraison.tournee_id).subquery())
+    return db.execute(
+        select(Tournee, Zone.nom, nb.c.nb, nb.c.livres, nb.c.non_livres)
+        .outerjoin(Zone, Zone.id == Tournee.zone_id).outerjoin(nb, nb.c.tournee_id == Tournee.id)
+        .where(Tournee.livreur_id == livreur.id, Tournee.date_tournee.between(du, au))
+        .order_by(Tournee.date_tournee.desc())).all()
 
 
 def livraisons_de(db: Session, tournee: Tournee) -> list[tuple[Livraison, Client]]:

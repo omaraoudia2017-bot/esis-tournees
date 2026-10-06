@@ -32,6 +32,10 @@ informatique.
 
 ## 2. Livreur : ma tournée du jour
 
+**Mes tournées passées et à venir** (menu) : calendrier des tournées des 60 derniers et 30 prochains
+jours, ou d'une date choisie. Une tournée d'un autre jour s'ouvre en consultation seule : carte,
+clients et résultats, sans digicode, téléphone ni notes (affichés seulement le jour même).
+
 **L'écran** affiche la date, le camion, la zone et la période de la tournée, le nombre de livraisons
 faites, la distance et l'heure de retour prévue, une carte et la liste des clients.
 
@@ -75,10 +79,15 @@ connexion, comptes verrouillés, courbe par jour et liste des tournées.
 **Tournées du jour**
 - Tableau des tournées du jour choisi (camion, zone, période, clients, pointés, à reporter, km).
 - « Suivre une tournée » : même carte et même liste que le livreur, en direct.
-- « Attribuer une tournée » : choisir le livreur et la période, coller les identifiants des clients
-  (un par ligne, pré-remplis après un import). Refus expliqués : camion inadapté, limite de la zone
-  dépassée, client déjà prévu ce jour-là, client sans position, date passée. Cocher « Remplacer » pour
-  refaire une tournée qui n'a pas commencé.
+- « Attribuer une tournée » : choisir d'abord la date puis le livreur (la liste indique qui est libre
+  et qui a DÉJÀ une tournée ce jour-là), la période, et coller les identifiants des clients. Refus
+  expliqués : camion inadapté, limite de la zone dépassée, client déjà prévu ce jour-là, client sans
+  position, date passée. Remplacer la tournée existante d'un livreur demande une case à cocher explicite.
+- Changer de livreur (tournée pas encore commencée) : « Suivre ou modifier une tournée », puis
+  « Donner la tournée à » un autre livreur libre ce jour-là, ou « Annuler l'attribution » : la
+  tournée passe **en attente** (clients et date conservés) et disparaît de l'application de l'ancien
+  livreur. Les tournées en attente sont listées en haut de la rubrique, chacune avec son choix de
+  livreur. Le nouveau livreur doit l'optimiser (l'ordre précédent est effacé).
 - « Ajouter un client déjà enregistré » à une tournée en cours.
 
 **Import CSV** : fichier au format de l'échantillon (`id_client`, `nom_client`, `adresse`,

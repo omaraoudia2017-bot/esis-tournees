@@ -186,18 +186,21 @@ def affecter_vehicule(db: Session, acteur: Acteur, utilisateur_id: int,
 
 
 # =========================================================================== tournées
-def lister_tournees(db: Session, jour: date):
+def lister_tournees(db: Session, jour: date | None, en_attente_depuis: date | None = None):
+    """Tournées d'un jour ; ou, avec `en_attente_depuis`, toutes les tournées sans livreur à venir."""
+    filtre = ([Tournee.date_tournee == jour] if en_attente_depuis is None
+              else [Tournee.livreur_id.is_(None), Tournee.date_tournee >= en_attente_depuis])
     nb = (select(Livraison.tournee_id, func.count().label("nb"),
                  func.count().filter(Livraison.statut.in_(ISSUES_POSSIBLES)).label("faites"),
                  func.count().filter(Livraison.statut == StatutLivraison.REPORTE).label("reportes"))
           .group_by(Livraison.tournee_id).subquery())
     return db.execute(
         select(Tournee, Utilisateur, Vehicule, Zone, nb.c.nb, nb.c.faites, nb.c.reportes)
-        .join(Utilisateur, Utilisateur.id == Tournee.livreur_id)
+        .outerjoin(Utilisateur, Utilisateur.id == Tournee.livreur_id)        # en attente : sans livreur
         .outerjoin(Vehicule, Vehicule.id == Tournee.vehicule_id)
         .outerjoin(Zone, Zone.id == Tournee.zone_id)
         .outerjoin(nb, nb.c.tournee_id == Tournee.id)
-        .where(Tournee.date_tournee == jour).order_by(Utilisateur.identifiant)).all()
+        .where(*filtre).order_by(Tournee.date_tournee, Utilisateur.identifiant.nulls_first())).all()
 
 
 def _periode(nom: str, reglages: Settings) -> Periode:
@@ -292,6 +295,69 @@ def creer_tournee(db: Session, acteur: Acteur, reglages: Settings, livreur_id: i
     return tournee
 
 
+def _tournee_modifiable(db: Session, reglages: Settings, tournee_id: int) -> Tournee:
+    tournee = db.get(Tournee, tournee_id)
+    if tournee is None:
+        raise ErreurAdmin(404, "Tournée introuvable.")
+    if tournee.statut != StatutTournee.PLANIFIEE:
+        raise ErreurAdmin(409, "La tournée a commencé : son livreur ne peut plus être changé.")
+    if tournee.date_tournee < aujourdhui(reglages):
+        raise ErreurAdmin(409, "Tournée d'une date passée : elle ne peut plus être modifiée.")
+    return tournee
+
+
+def _oublier_optimisation(db: Session, tournee: Tournee) -> None:
+    """Le départ (domicile ou dépôt) et le camion dépendent du livreur : l'ordre et les heures
+    prévues sont à recalculer par le nouveau livreur (bouton « Optimiser »)."""
+    tournee.optimisee_le = tournee.distance_totale_km = tournee.duree_estimee_min = None
+    for l in db.scalars(select(Livraison).where(Livraison.tournee_id == tournee.id)):
+        l.ordre_passage, l.heure_arrivee_prevue = None, None
+
+
+def desattribuer_tournee(db: Session, acteur: Acteur, reglages: Settings, tournee_id: int) -> Tournee:
+    """Annule l'attribution : la tournée reste (clients, date, période) mais « en attente »,
+    sans livreur ; elle disparaît de l'application de l'ancien livreur."""
+    tournee = _tournee_modifiable(db, reglages, tournee_id)
+    if tournee.livreur_id is None:
+        raise ErreurAdmin(409, "Cette tournée est déjà en attente d'un livreur.")
+    ancien = db.get(Utilisateur, tournee.livreur_id)
+    tournee.livreur_id = tournee.vehicule_id = None
+    _oublier_optimisation(db, tournee)
+    acteur.tracer(db, "ADMIN_DESATTRIBUTION_TOURNEE", cible=ancien.identifiant, tournee_id=tournee.id,
+                  date=tournee.date_tournee.isoformat())
+    db.commit()
+    return tournee
+
+
+def reattribuer_tournee(db: Session, acteur: Acteur, reglages: Settings, tournee_id: int,
+                        livreur_id: int) -> Tournee:
+    """Donne une tournée (en attente, ou d'un autre livreur) à un livreur : même contrôles qu'à
+    la création (compte actif, camion compatible avec chaque client, une tournée par jour)."""
+    tournee = _tournee_modifiable(db, reglages, tournee_id)
+    if tournee.livreur_id == livreur_id:
+        raise ErreurAdmin(409, "Cette tournée est déjà attribuée à ce livreur.")
+    livreur = db.get(Utilisateur, livreur_id)
+    if livreur is None or livreur.role != RoleUtilisateur.LIVREUR or not livreur.actif:
+        raise ErreurAdmin(404, "Livreur introuvable ou désactivé.")
+    vehicule = db.get(Vehicule, livreur.vehicule_id) if livreur.vehicule_id else None
+    if vehicule is None:
+        raise ErreurAdmin(409, f"{livreur.identifiant} n'a pas de véhicule : affectez-lui un camion.")
+    autre = db.scalar(select(Tournee).where(Tournee.livreur_id == livreur.id,
+                                            Tournee.date_tournee == tournee.date_tournee))
+    if autre is not None:
+        raise ErreurAdmin(409, f"{livreur.prenom} {livreur.nom} a déjà une tournée le "
+                          f"{tournee.date_tournee:%d/%m/%Y} : retirez-la d'abord ou choisissez un autre livreur.")
+    ids = list(db.scalars(select(Livraison.client_id).where(Livraison.tournee_id == tournee.id)))
+    _controler_clients(db, ids, vehicule)                     # camion hayon / normal
+    ancien = db.get(Utilisateur, tournee.livreur_id) if tournee.livreur_id else None
+    tournee.livreur_id, tournee.vehicule_id = livreur.id, vehicule.id
+    _oublier_optimisation(db, tournee)
+    acteur.tracer(db, "ADMIN_REATTRIBUTION_TOURNEE", cible=livreur.identifiant, tournee_id=tournee.id,
+                  ancien=ancien.identifiant if ancien else None, date=tournee.date_tournee.isoformat())
+    db.commit()
+    return tournee
+
+
 def ajouter_client_existant(db: Session, acteur: Acteur, reglages: Settings, tournee_id: int,
                             id_client: str) -> Livraison:
     """Ajout d'un client déjà en base à une tournée (réservé à l'administrateur : un livreur ne
@@ -303,7 +369,7 @@ def ajouter_client_existant(db: Session, acteur: Acteur, reglages: Settings, tou
         raise ErreurAdmin(409, "La tournée est terminée.")
     vehicule = db.get(Vehicule, tournee.vehicule_id) if tournee.vehicule_id else None
     if vehicule is None:
-        raise ErreurAdmin(409, "Tournée sans véhicule.")
+        raise ErreurAdmin(409, "Tournée en attente : attribuez-la d'abord à un livreur.")
     (client,) = _controler_clients(db, [id_client], vehicule)
     if _deja_planifies(db, tournee.date_tournee, [id_client]):
         raise ErreurAdmin(409, "Ce client est déjà dans une tournée ce jour-là.")
@@ -479,7 +545,7 @@ def tableau_de_bord(db: Session, reglages: Settings, jours: int = 30) -> Tableau
     lignes = db.execute(select(Livraison, Client, Tournee.date_tournee)
                         .join(Client, Client.id_client == Livraison.client_id)
                         .join(Tournee, Tournee.id == Livraison.tournee_id)
-                        .where(Tournee.date_tournee.between(debut, fin))).all()
+                        .where(Tournee.date_tournee.between(debut, fin), Tournee.livreur_id.is_not(None))).all()
     td.nb_tournees, td.nb_livraisons = len(tournees), len(lignes)
     td.statuts = dict(Counter(l.statut.value for l, _, _ in lignes))
 

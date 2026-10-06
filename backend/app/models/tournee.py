@@ -19,7 +19,8 @@ class Tournee(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     date_tournee: Mapped[date] = mapped_column(Date, index=True)
-    livreur_id: Mapped[int] = mapped_column(ForeignKey("utilisateurs.id", ondelete="RESTRICT"))
+    # NULL = tournée « en attente » : attribution annulée par le planificateur, à redonner
+    livreur_id: Mapped[int | None] = mapped_column(ForeignKey("utilisateurs.id", ondelete="RESTRICT"))
     vehicule_id: Mapped[int | None] = mapped_column(ForeignKey("vehicules.id", ondelete="SET NULL"))
     zone_id: Mapped[int | None] = mapped_column(ForeignKey("zones.id", ondelete="SET NULL"))
     statut: Mapped[StatutTournee] = mapped_column(

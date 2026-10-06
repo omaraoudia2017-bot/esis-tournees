@@ -82,6 +82,24 @@ class TourneeVue(BaseModel):
     domicile: Point | None = None              # visible par le livreur lui-même uniquement
     trajet_domicile_depot_min: int | None = None
     annulation_possible: AnnulationPossible | None = None
+    # Tournée d'un autre jour consultée par le livreur : lecture seule, sans digicode, téléphone ni
+    # notes (ils ne sont utiles que le jour même : minimisation des données)
+    consultation_seule: bool = False
+
+
+class TourneeLivreurResume(BaseModel):
+    """Une ligne du calendrier du livreur (tournées passées et à venir)."""
+    id: int
+    date_tournee: date
+    statut: str
+    zone: str | None
+    heure_depart: time | None
+    heure_fin: time | None
+    nb_clients: int
+    nb_livres: int
+    nb_non_livres: int                 # absents, refus, à reporter
+    distance_totale_km: float | None
+    optimisee: bool
 
 
 class ReponseOptimisation(BaseModel):

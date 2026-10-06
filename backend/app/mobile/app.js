@@ -25,7 +25,7 @@ const etat = {
   ecran: "connexion", jeton: null, preauth: null, expireLe: null, profil: null, tournee: null,
   message: null, messageConnexion: null, enrolement: null, codesSecours: null, conditions: null,
   lectureConditions: false, issue: {}, remarqueOuverte: null, occupe: false, calcul: false, domicile: null,
-  trajets: null, aSupprimer: null,
+  trajets: null, aSupprimer: null, calendrier: null, tourneeConsultee: null,
 };
 const POINTS = { depot: "Dépôt", domicile: "Domicile" };
 const IDEES_ETAPES = ["Garage", "Contrôle technique", "Récupérer une pièce", "Station de lavage"];
@@ -112,7 +112,8 @@ function annoncer(type, texte) { etat.message = { type, texte }; }
 function deconnexionLocale(message) {
   Object.assign(etat, { ecran: "connexion", jeton: null, preauth: null, expireLe: null, profil: null,
     tournee: null, message: null, enrolement: null, codesSecours: null, conditions: null, issue: {},
-    remarqueOuverte: null, domicile: null, trajets: null, aSupprimer: null, messageConnexion: message || null });
+    remarqueOuverte: null, domicile: null, trajets: null, aSupprimer: null, calendrier: null, tourneeConsultee: null,
+    messageConnexion: message || null });
   rendre();
 }
 
@@ -197,7 +198,7 @@ function rendre() {
   const app = document.getElementById("app");
   const ecrans = { connexion: ecranConnexion, verification: ecranVerification, enrolement: ecranEnrolement,
     codes: ecranCodes, nouveauMdp: ecranNouveauMdp, conditions: ecranConditions, tournee: ecranTournee, menu: ecranMenu, domicile: ecranDomicile,
-    trajets: ecranTrajets };
+    trajets: ecranTrajets, calendrier: ecranCalendrier, tourneeDate: ecranTourneeDate };
   const defile = app.querySelector(".defilement, .page");
   const position = defile ? defile.scrollTop : 0;
   const memeEcran = app.dataset.ecran === etat.ecran;
@@ -465,6 +466,7 @@ function ecranMenu() {
     p.type_livreur === "interne" ? h("button", { type: "button", classe: "btn btn-menu", texte: "Mon adresse de départ et de retour", onclick: ouvrirDomicile }) : null,
     h("button", { type: "button", classe: "btn btn-menu", texte: "Relire les conditions et mes données", onclick: () => ouvrirConditions(true) }),
     h("button", { type: "button", classe: "btn btn-menu", texte: "Actualiser ma tournée", onclick: chargerTournee }),
+    h("button", { type: "button", classe: "btn btn-menu", texte: "Mes tournées : passées et à venir", onclick: ouvrirCalendrier }),
     !t ? h("button", { type: "button", classe: "btn btn-menu", texte: "Mes trajets de la journée", onclick: () => { etat.message = null; chargerTrajets(); } }) : null,
     h("button", { type: "button", classe: "btn btn-menu btn-danger", texte: "Se déconnecter", onclick: async () => {
       await api("POST", "/auth/deconnexion");
@@ -551,7 +553,8 @@ function ecranTournee() {
           ? nb + " étape(s) prévue(s), " + restantes + " restante(s)" + (j.optimisee_le ? " · itinéraire optimisé" : " · pas encore optimisé") + "."
           : "Garage, contrôle technique, récupération d'une pièce… Saisissez vos adresses et l'application calcule le meilleur ordre de passage en respectant vos rendez-vous." }),
         h("button", { type: "button", classe: "btn btn-principal", texte: nb ? "Mes trajets de la journée" : "Organiser mes trajets de la journée", onclick: () => { etat.message = null; chargerTrajets(); } })),
-      h("button", { type: "button", classe: "btn btn-contour", texte: "Actualiser", onclick: chargerTournee }));
+      h("button", { type: "button", classe: "btn btn-contour", texte: "Mes tournées passées et à venir", onclick: ouvrirCalendrier }),
+      h("button", { type: "button", classe: "btn", texte: "Actualiser", onclick: chargerTournee }));
     return h("div", { classe: "ecran" }, entete, corps);
   }
 
@@ -1066,6 +1069,112 @@ async function optimiserTrajets() {
     etat.calcul = false;
   }
   await chargerTrajets();
+}
+
+// ---------------- calendrier : tournées passées et à venir
+function aujourdhuiISO() { return new Date().toLocaleDateString("sv-SE", { timeZone: FUSEAU }); }
+function dateLongue(iso) {
+  const texte = new Date(iso + "T12:00:00").toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+  return texte.charAt(0).toUpperCase() + texte.slice(1);
+}
+
+async function ouvrirCalendrier() {
+  const r = await appel("GET", "/tournees/mes-tournees");
+  if (!r) return;
+  if (r.status !== 200) { annoncer("erreur", r.detail); rendre(); return; }
+  etat.calendrier = r.data;
+  etat.message = null;
+  etat.ecran = "calendrier";
+  rendre();
+}
+
+async function ouvrirTourneeDate(jour) {
+  if (jour === aujourdhuiISO()) { etat.message = null; await chargerTournee(); return; }
+  const r = await appel("GET", "/tournees/date/" + jour);
+  if (!r) return;
+  if (r.status !== 200) { annoncer("info", r.detail); etat.ecran = "calendrier"; rendre(); return; }
+  etat.tourneeConsultee = r.data;
+  etat.message = null;
+  etat.ecran = "tourneeDate";
+  rendre();
+}
+
+function enteteRetour(titre, sousTitre, retour) {
+  return h("div", { classe: "entete" },
+    h("button", { type: "button", classe: "btn-icone", "aria-label": "Retour", onclick: retour }, icone(["M15 5l-7 7 7 7"])),
+    h("div", { style: { flex: "1" } }, h("div", { classe: "titre", texte: titre }), h("div", { classe: "sous-titre", texte: sousTitre })),
+    h("button", { type: "button", classe: "btn-icone", "aria-label": "Ouvrir le menu", onclick: () => { etat.ecran = "menu"; rendre(); } },
+      icone(["M4 7h16", "M4 12h16", "M4 17h16"])));
+}
+
+const LIBELLES_TOURNEE = { planifiee: ["Prévue", "#1F4E79"], en_cours: ["En cours", "#B45309"], terminee: ["Effectuée", "#15803D"] };
+
+function carteCalendrier(t) {
+  const [libelle, couleur] = LIBELLES_TOURNEE[t.statut] || [t.statut, "#5B6472"];
+  const passee = t.date_tournee < aujourdhuiISO();
+  const details = [(t.heure_depart || "").slice(0, 5) + "–" + (t.heure_fin || "").slice(0, 5), t.zone || "zone non définie"];
+  const bilan = t.statut === "planifiee" && !passee
+    ? t.nb_clients + " client(s)" + (t.optimisee ? "" : " · à optimiser le jour même")
+    : t.nb_livres + " livré(s) sur " + t.nb_clients + (t.nb_non_livres ? " · " + t.nb_non_livres + " non livré(s)" : "");
+  return h("button", { type: "button", classe: "livraison carte-jour", onclick: () => ouvrirTourneeDate(t.date_tournee) },
+    h("div", { classe: "ligne-titre" },
+      h("div", { classe: "nom", texte: dateLongue(t.date_tournee) }),
+      h("div", { classe: "statut", style: { color: couleur }, texte: "● " + libelle })),
+    h("div", { classe: "petit", texte: details.join(" · ") }),
+    h("div", { classe: "petit", texte: bilan + (t.distance_totale_km ? " · " + nombre(t.distance_totale_km) + " km" : "") }));
+}
+
+function ecranCalendrier() {
+  const liste = etat.calendrier || [];
+  const auj = aujourdhuiISO();
+  const aVenir = liste.filter((t) => t.date_tournee > auj).sort((a, b) => a.date_tournee.localeCompare(b.date_tournee));
+  const duJour = liste.filter((t) => t.date_tournee === auj);
+  const passees = liste.filter((t) => t.date_tournee < auj);
+  const champ = h("input", { type: "date", id: "cal-date", value: auj });
+  const corps = h("div", { classe: "defilement" });
+  corps.append(boiteMessage(etat.message, () => { etat.message = null; rendre(); }) || "",
+    h("div", { classe: "livraison" },
+      h("label", { classe: "champ", for: "cal-date" }, "Voir la tournée d'une date", champ),
+      h("button", { type: "button", classe: "btn btn-contour", texte: "Afficher", onclick: () => { if (champ.value) ouvrirTourneeDate(champ.value); } })));
+  if (duJour.length) { corps.append(h("h2", { classe: "section", texte: "Aujourd'hui" })); duJour.forEach((t) => corps.append(carteCalendrier(t))); }
+  corps.append(h("h2", { classe: "section", texte: "À venir (" + aVenir.length + ")" }));
+  if (!aVenir.length) corps.append(h("p", { classe: "petit", texte: "Aucune tournée prévue pour l'instant dans les 30 prochains jours." }));
+  aVenir.forEach((t) => corps.append(carteCalendrier(t)));
+  corps.append(h("h2", { classe: "section", texte: "Effectuées (" + passees.length + ")" }));
+  if (!passees.length) corps.append(h("p", { classe: "petit", texte: "Aucune tournée sur les 60 derniers jours." }));
+  passees.forEach((t) => corps.append(carteCalendrier(t)));
+  return h("div", { classe: "ecran" }, enteteRetour("Mes tournées", "Passées et à venir", () => { etat.message = null; chargerTournee(); }), corps);
+}
+
+function ecranTourneeDate() {
+  const t = etat.tourneeConsultee;
+  const corps = h("div", { classe: "defilement" });
+  const livres = t.livraisons.filter((l) => l.statut === "livre").length;
+  if (t.consultation_seule) {
+    corps.append(boiteMessage({ type: "info", texte: t.date_tournee > aujourdhuiISO()
+      ? "Tournée à venir, en consultation seule. L'ordre peut encore changer : vous l'optimiserez le jour même. Digicodes, téléphones et notes s'afficheront ce jour-là."
+      : "Tournée passée, en consultation seule. Digicodes, téléphones et notes ne sont plus affichés." }));
+  }
+  const indicateur = (libelle, valeur) => h("div", { classe: "indicateur" }, h("div", { classe: "libelle", texte: libelle }), h("div", { classe: "valeur", texte: valeur }));
+  corps.append(h("div", { classe: "indicateurs" },
+    indicateur(t.statut === "planifiee" ? "Clients" : "Livrés", t.statut === "planifiee" ? String(t.livraisons.length) : livres + " / " + t.livraisons.length),
+    indicateur("Distance", t.distance_totale_km ? nombre(t.distance_totale_km) + " km" : "—"),
+    indicateur("Période", Number(t.heure_depart.slice(0, 2)) + " h–" + Number(t.heure_fin.slice(0, 2)) + " h")));
+  corps.append(carteGeo(t), h("p", { classe: "tres-petit", style: { marginTop: "-6px" }, texte: "D : dépôt. Tracé à vol d'oiseau." }));
+  t.livraisons.forEach((l, k) => {
+    const c = l.client;
+    const [libelle, couleur] = STATUTS[l.statut];
+    const infos = ["Créneau " + (c.creneau_debut || "07:00").slice(0, 5) + "–" + (c.creneau_fin || "22:00").slice(0, 5)];
+    if (l.heure_fin_livraison) infos.push("passé à " + heure(l.heure_debut_livraison));
+    else if (l.heure_arrivee_prevue) infos.push("prévu " + heure(l.heure_arrivee_prevue));
+    corps.append(h("article", { classe: "livraison", "aria-label": c.nom },
+      h("div", { classe: "ligne-titre" },
+        h("div", { classe: "nom", texte: (l.ordre_passage || k + 1) + ". " + c.nom }),
+        h("div", { classe: "statut", style: { color: couleur }, texte: "● " + libelle })),
+      h("div", { classe: "adresse", texte: c.adresse }),
+      h("div", { classe: "petit", texte: infos.join(" · ") })));
+  });
+  return h("div", { classe: "ecran" }, enteteRetour(dateLongue(t.date_tournee), (t.zone || "—") + " · camion " + (t.vehicule || "—"), ouvrirCalendrier), corps);
 }
 
 // --------------------------------------------------------------------------- démarrage

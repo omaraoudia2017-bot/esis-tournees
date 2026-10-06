@@ -16,9 +16,10 @@ from app.core.config import get_settings
 from app.db.session import get_db
 from app.models import Client, JournalSecurite, Tournee, Utilisateur, Vehicule, Zone
 from app.models.enums import RoleUtilisateur, TypeCamion
-from app.schemas.admin import (BilanGeocodageVue, ClientExclu, ClientRepartition, ClientResume, CompteVue,
-                               DemandeAjoutExistant, DemandeAnonymisation, DemandeCompte, DemandeCorrection,
-                               DemandeGeocodage, DemandeImport, DemandeRepartition, DemandeTournee,
+from app.schemas.admin import (ApercuClient, BilanGeocodageVue, ClientExclu, ClientRepartition, ClientResume, CompteVue,
+                               DemandeAjoutExistant, DemandeAnonymisation, DemandeApercu, DemandeCompte, DemandeCorrection,
+                               DemandeGeocodage, DemandeImport, DemandeReattribution, DemandeRepartition,
+                               DemandeTournee,
                                DemandeTypeLivreur, DemandeVehicule, GroupeRepartition, LivreurDisponible,
                                PropositionRepartition,
                                ReponseCompte, ReponseImport, RejetVue, TableauDeBordVue,
@@ -178,18 +179,50 @@ def geocoder(demande: DemandeGeocodage, a: service.Acteur = Depends(acteur),
 
 
 # --------------------------------------------------------------------------- tournées
-@router.get("/tournees", response_model=list[TourneeResume])
-def lister_tournees(jour: date | None = Query(None, alias="date"), db: Session = Depends(get_db)):
-    jour = jour or service.aujourdhui(get_settings())
+def _resumes(lignes) -> list[TourneeResume]:
     return [TourneeResume(
-        id=t.id, date_tournee=t.date_tournee, livreur=u.identifiant, livreur_nom=f"{u.prenom} {u.nom}",
+        id=t.id, date_tournee=t.date_tournee, livreur=u.identifiant if u else None,
+        livreur_nom=f"{u.prenom} {u.nom}" if u else None,
         vehicule=v.immatriculation if v else None, type_camion=v.type_camion.value if v else None,
         zone=z.nom if z else None, statut=t.statut.value, nb_clients=nb or 0, max_clients=t.max_clients,
         nb_terminees=faites or 0, nb_a_reporter=reportes or 0, heure_depart=t.heure_depart,
         heure_fin=t.heure_fin, optimisee=t.optimisee_le is not None,
         distance_totale_km=float(t.distance_totale_km) if t.distance_totale_km is not None else None,
         attribuee_le=t.cree_le,
-    ) for t, u, v, z, nb, faites, reportes in service.lister_tournees(db, jour)]
+    ) for t, u, v, z, nb, faites, reportes in lignes]
+
+
+@router.get("/tournees", response_model=list[TourneeResume])
+def lister_tournees(jour: date | None = Query(None, alias="date"), db: Session = Depends(get_db)):
+    jour = jour or service.aujourdhui(get_settings())
+    return _resumes(service.lister_tournees(db, jour))
+
+
+@router.get("/tournees/en-attente", response_model=list[TourneeResume])
+def tournees_en_attente(db: Session = Depends(get_db)):
+    """Tournées à venir dont l'attribution a été annulée : à redonner à un livreur."""
+    return _resumes(service.lister_tournees(db, None, en_attente_depuis=service.aujourdhui(get_settings())))
+
+
+@router.post("/tournees/{tournee_id}/desattribuer", response_model=TourneeResume)
+def desattribuer_tournee(tournee_id: int, a: service.Acteur = Depends(acteur), db: Session = Depends(get_db)):
+    """Annule l'attribution (tournée pas encore commencée) : la tournée passe « en attente »."""
+    try:
+        t = service.desattribuer_tournee(db, a, get_settings(), tournee_id)
+    except service.ErreurAdmin as e:
+        raise _http(e) from None
+    return next(r for r in _resumes(service.lister_tournees(db, t.date_tournee)) if r.id == t.id)
+
+
+@router.post("/tournees/{tournee_id}/attribuer", response_model=TourneeResume)
+def reattribuer_tournee(tournee_id: int, demande: DemandeReattribution, a: service.Acteur = Depends(acteur),
+                        db: Session = Depends(get_db)):
+    """Donne la tournée (en attente, ou d'un autre livreur) à un livreur disponible ce jour-là."""
+    try:
+        t = service.reattribuer_tournee(db, a, get_settings(), tournee_id, demande.livreur_id)
+    except service.ErreurAdmin as e:
+        raise _http(e) from None
+    return next(r for r in _resumes(service.lister_tournees(db, t.date_tournee)) if r.id == t.id)
 
 
 @router.post("/tournees", response_model=TourneeResume, status_code=201)
@@ -203,7 +236,7 @@ def creer_tournee(demande: DemandeTournee, a: service.Acteur = Depends(acteur),
                                   demande.date_tournee, demande.periode, demande.remplacer)
     except service.ErreurAdmin as e:
         raise _http(e) from None
-    return next(r for r in lister_tournees(t.date_tournee, db) if r.id == t.id)
+    return next(r for r in _resumes(service.lister_tournees(db, t.date_tournee)) if r.id == t.id)
 
 
 @router.get("/tournees/{tournee_id}", response_model=TourneeVue)
@@ -228,6 +261,19 @@ def ajouter_client_existant(tournee_id: int, demande: DemandeAjoutExistant,
 
 
 # --------------------------------------------------------------------------- répartition en tournées
+@router.post("/repartition/apercu", response_model=list[ApercuClient])
+def apercu_repartition(demande: DemandeApercu, db: Session = Depends(get_db)):
+    """Code postal, ville et créneau des clients d'une liste (grille « code postal × heure »).
+    Ni adresse, ni téléphone, ni digicode : le strict nécessaire (minimisation)."""
+    ids = list(dict.fromkeys(i.strip() for i in demande.clients))
+    clients = db.scalars(select(Client).where(Client.id_client.in_(ids), Client.actif.is_(True))
+                         .order_by(Client.code_postal, Client.creneau_debut)).all()
+    return [ApercuClient(id_client=c.id_client, nom=c.nom_client, code_postal=c.code_postal, ville=c.ville,
+                         creneau_debut=c.creneau_debut, creneau_fin=c.creneau_fin,
+                         type_camion_requis=c.type_camion_requis.value, localise=c.latitude is not None)
+            for c in clients]
+
+
 @router.post("/repartition", response_model=PropositionRepartition)
 def proposer_repartition(demande: DemandeRepartition, db: Session = Depends(get_db)):
     """Classe une liste de clients (zone, plage horaire, type de camion), la coupe selon la limite
