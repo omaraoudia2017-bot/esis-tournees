@@ -1,17 +1,20 @@
-"""Répartition d'une liste de clients en tournées (aide au planificateur, module 4).
+"""Répartition d'une liste de clients en tournées RÉALISABLES (aide au planificateur, module 4).
 
 Le planificateur fournit une liste (en général le dernier import CSV, complétée par une recherche).
-L'application CLASSE les clients puis PROPOSE des groupes, chacun destiné à une tournée :
+L'application CLASSE les clients puis PROPOSE des tournées :
 
-  1. secteur de livraison : la zone (déduite du code postal à l'import) ;
-  2. plage horaire : matin / après-midi / soirée, selon le milieu du créneau du client (même règle
-     que la segmentation de l'optimisation, jour 6) ; ou journée complète ;
-  3. type de camion : un client « hayon » (palette) ne peut aller que dans un camion hayon ;
-  4. limite d'effectif de la zone (10 à 20 clients) : un groupe trop grand est coupé en parts
-     égales, en gardant ensemble les clients d'un même code postal autant que possible, puis
-     dans l'ordre d'un balayage autour du dépôt (clients voisins dans la même tournée).
+  1. plage horaire : matin / après-midi / soirée, selon le milieu du créneau du client (même règle
+     que la segmentation de l'optimisation) ; ou journée complète ;
+  2. secteur (zone, déduite du code postal) et type de camion (un client « hayon » ne peut aller
+     que dans un camion hayon) ;
+  3. faisabilité pour le livreur : au plus N clients prévus dans une même heure (2 par défaut),
+     et une limite qui dépend de la période (N x heures, sans dépasser la limite de la zone : seule
+     une tournée de la journée complète atteint 20 clients). Les clients sont placés par ordre
+     d'échéance (créneau qui finit le plus tôt d'abord), de préférence avec ceux du même code postal ;
+  4. ordre horaire dans chaque tournée et heure de départ du dépôt au plus tard ; l'optimisation
+     du livreur réorganise ensuite l'ordre géographique.
 
-Pour chaque groupe, un livreur disponible est proposé (camion du bon type, pas encore de tournée ce
+Pour chaque tournée, un livreur disponible est proposé (camion du bon type, pas encore de tournée ce
 jour-là). Rien n'est enregistré ici : le planificateur ajuste puis valide, et chaque tournée est
 créée par `creer_tournee`, avec tous ses contrôles (limite, camion, doublons, date).
 """
@@ -25,8 +28,9 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings
 from app.models import Client, Livraison, Tournee, Utilisateur, Vehicule, Zone
 from app.models.enums import RoleUtilisateur
-from app.optim.segmentation import periode_de
-from app.services.planification import periodes, vers_client_tournee
+from app.optim.faisabilite import heures_possibles, limite_periode
+from app.optim.segmentation import Periode, periode_de
+from app.services.planification import faisabilite, periodes, vers_client_tournee
 
 LIMITE_PAR_DEFAUT = 15
 MAX_CLIENTS_LISTE = 500
@@ -37,9 +41,12 @@ class Groupe:
     zone: Zone | None
     type_camion: str
     periode: str
-    clients: list[Client]
+    clients: list[Client]                  # dans l'ordre horaire proposé
     limite: int
     livreur: Utilisateur | None = None
+    heures: dict[str, int] = field(default_factory=dict)       # client -> heure visée (8 = 8 h - 9 h)
+    debut_periode_s: int = 0
+    depart_au_plus_tard_s: int | None = None
 
     @property
     def codes_postaux(self) -> list[str]:
@@ -75,6 +82,36 @@ def couper(clients: list[Client], limite: int, reglages: Settings) -> list[list[
     return parts
 
 
+def emballer(clients: list[Client], periode: Periode, limite: int, par_heure: int,
+             reglages: Settings) -> list[list[Client]]:
+    """Tournées réalisables : chaque client (par ordre d'échéance) rejoint la première tournée,
+    de préférence avec son code postal, qui a encore de la place au total ET dans une heure de son
+    créneau (au plus `par_heure` clients par heure) ; sinon une nouvelle tournée est ouverte."""
+    en_tournee = {c.id_client: vers_client_tournee(c, reglages, temps_service_s=0) for c in clients}
+    ordre = sorted(clients, key=lambda c: (en_tournee[c.id_client].fin_s, en_tournee[c.id_client].debut_s,
+                                           c.code_postal, _angle(c, reglages)))
+    tournees: list[dict] = []
+    for c in ordre:
+        heures = heures_possibles(en_tournee[c.id_client], periode)
+        choix = None
+        for k in sorted(range(len(tournees)), key=lambda k: (c.code_postal not in tournees[k]["cps"], k)):
+            t = tournees[k]
+            if len(t["clients"]) >= limite:
+                continue
+            h = next((h for h in heures if t["charge"].get(h, 0) < par_heure), None)
+            if h is not None:
+                choix = (t, h)
+                break
+        if choix is None:
+            tournees.append({"clients": [], "charge": {}, "cps": set()})
+            choix = (tournees[-1], heures[0])
+        t, h = choix
+        t["clients"].append(c)
+        t["charge"][h] = t["charge"].get(h, 0) + 1
+        t["cps"].add(c.code_postal)
+    return [t["clients"] for t in tournees]
+
+
 def livreurs_disponibles(db: Session, jour: date) -> list[tuple[Utilisateur, Vehicule]]:
     """Livreurs actifs, avec un camion actif, sans tournée ce jour-là."""
     # (NOT IN avec un NULL ne renverrait aucune ligne : les tournées en attente sont écartées)
@@ -87,7 +124,8 @@ def livreurs_disponibles(db: Session, jour: date) -> list[tuple[Utilisateur, Veh
 
 
 def proposer(db: Session, reglages: Settings, jour: date, ids: list[str],
-             journee_continue: bool = False) -> Proposition:
+             journee_continue: bool = False, par_heure: int | None = None) -> Proposition:
+    par_heure = par_heure or reglages.clients_max_par_heure
     ids = list(dict.fromkeys(i.strip() for i in ids if i.strip()))[:MAX_CLIENTS_LISTE]
     prop = Proposition(jour=jour)
     trouves = {c.id_client: c for c in db.scalars(select(Client).where(Client.id_client.in_(ids)))}
@@ -119,11 +157,17 @@ def proposer(db: Session, reglages: Settings, jour: date, ids: list[str],
         (plage, zone_id, type_camion), _ = item
         return rang_plage[plage], zones[zone_id].nom if zone_id in zones else "~", type_camion
 
+    par_nom = {p.nom: p for p in plages}
     for (plage, zone_id, type_camion), membres in sorted(paquets.items(), key=cle_tri):
-        zone = zones.get(zone_id)
-        limite = zone.max_clients if zone else LIMITE_PAR_DEFAUT
-        for part in couper(membres, limite, reglages):
-            prop.groupes.append(Groupe(zone, type_camion, plage, part, limite))
+        zone, periode = zones.get(zone_id), par_nom[plage]
+        limite = limite_periode(periode, zone.max_clients if zone else LIMITE_PAR_DEFAUT, par_heure)
+        for part in emballer(membres, periode, limite, par_heure, reglages):
+            f = faisabilite(part, periode, reglages, par_heure=par_heure)
+            rang = {i: k for k, i in enumerate(f.ordre)}
+            part.sort(key=lambda c: rang.get(c.id_client, len(rang)))           # ordre horaire
+            prop.groupes.append(Groupe(zone, type_camion, plage, part, limite, heures=f.heures,
+                                       debut_periode_s=periode.depart_s,
+                                       depart_au_plus_tard_s=f.depart_au_plus_tard_s))
 
     # Proposition de livreurs : un par groupe (une seule tournée par livreur et par jour)
     prop.livreurs = livreurs_disponibles(db, jour)

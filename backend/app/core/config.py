@@ -68,6 +68,9 @@ class Settings(BaseSettings):
 
     # Journée de trajets (jours sans tournée) : étapes saisies par le livreur
     trajets_max_etapes: int = 15
+    # Faisabilité d'une tournée : au plus N clients prévus dans une même heure (8 h - 9 h...) ;
+    # la limite d'une tournée = N x heures de sa période (sans dépasser la limite de la zone)
+    clients_max_par_heure: int = 2
     trajets_duree_defaut_min: int = 15
 
     # Écran du livreur : annulation d'un clic Démarrer / Terminer fait par erreur

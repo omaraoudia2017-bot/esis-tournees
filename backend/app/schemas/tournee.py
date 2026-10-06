@@ -85,6 +85,8 @@ class TourneeVue(BaseModel):
     # Tournée d'un autre jour consultée par le livreur : lecture seule, sans digicode, téléphone ni
     # notes (ils ne sont utiles que le jour même : minimisation des données)
     consultation_seule: bool = False
+    # Avant le départ : heure limite pour quitter le dépôt sans manquer un créneau (ordre affiché)
+    depart_depot_au_plus_tard: time | None = None
 
 
 class TourneeLivreurResume(BaseModel):

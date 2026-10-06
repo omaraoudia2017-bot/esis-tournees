@@ -26,11 +26,13 @@ from app.models import (CacheGeocodage, Client, CodeSecours, JournalSecurite, Li
                         Utilisateur, Vehicule, Zone)
 from app.models.enums import (PrecisionGeocodage, RoleUtilisateur, SourceClient, StatutLivraison,
                               StatutTournee, TypeCamion, TypeLivreur)
+from app.optim.faisabilite import limite_periode
+from app.optim.probleme import en_heure, en_secondes
 from app.optim.segmentation import Periode
 from app.services.domicile import effacer_domicile
 from app.services.geocodage import cle_cache
 from app.services.journal import ContexteRequete, journaliser
-from app.services.planification import estimer_temps_service_s, periodes
+from app.services.planification import estimer_temps_service_s, faisabilite, periodes
 from app.services.referentiel import zone_id_pour
 from app.services.remarques import effacer_remarques_client, toutes_les_remarques
 from app.services.tournees import ISSUES_POSSIBLES, aujourdhui, maintenant
@@ -268,14 +270,20 @@ def creer_tournee(db: Session, acteur: Acteur, reglages: Settings, livreur_id: i
     if doublons:
         raise ErreurAdmin(409, "Clients déjà dans une autre tournée ce jour-là : " + ", ".join(doublons))
 
-    # Limite d'effectif : celle de la zone majoritaire (10 à 20 clients selon la densité)
+    # Limite d'effectif : celle de la zone majoritaire (10 à 20 clients selon la densité), réduite
+    # pour une demi-journée (N clients par heure de la période) : 20 clients = journée complète
     zone_id = Counter(c.zone_id for c in clients).most_common(1)[0][0]
     zone = db.get(Zone, zone_id) if zone_id else None
-    limite = zone.max_clients if zone else 15
+    limite_zone = zone.max_clients if zone else 15
+    limite = limite_periode(p, limite_zone, reglages.clients_max_par_heure)
     if len(ids) > limite:
+        precision = "" if limite == limite_zone else (
+            f", période {p.nom} : {reglages.clients_max_par_heure} clients par heure au plus")
         raise ErreurAdmin(409, f"Tournée non attribuée : {len(ids)} clients pour une limite de {limite} "
-                          f"(zone {zone.nom if zone else 'non définie'}). Retirez {len(ids) - limite} client(s) "
-                          f"de la liste : ils pourront être attribués à un autre livreur ou un autre jour.")
+                          f"(zone {zone.nom if zone else 'non définie'}{precision}). Retirez {len(ids) - limite} "
+                          f"client(s) de la liste : ils pourront être attribués à un autre livreur ou un autre jour.")
+    # Ordre initial = ordre horaire des créneaux ; le livreur optimise ensuite l'ordre géographique
+    clients = sorted(clients, key=lambda c: (c.creneau_debut or time(0), c.creneau_fin or time(23, 59)))
 
     if existante is not None:
         db.delete(existante)                     # livraisons supprimées en cascade
@@ -293,6 +301,25 @@ def creer_tournee(db: Session, acteur: Acteur, reglages: Settings, livreur_id: i
                   nb_clients=len(ids), date=jour.isoformat(), remplacee=existante is not None)
     db.commit()
     return tournee
+
+
+def avertissements_tournee(db: Session, reglages: Settings, tournee: Tournee) -> list[str]:
+    """Signaux de faisabilité (sans bloquer) : créneaux surchargés, départ trop matinal."""
+    lignes = db.execute(select(Client, Livraison.temps_service_predit_s)
+                        .join(Livraison, Livraison.client_id == Client.id_client)
+                        .where(Livraison.tournee_id == tournee.id, Client.latitude.is_not(None))).all()
+    clients = [c for c, _ in lignes]
+    debut, fin = (en_secondes(tournee.heure_depart or reglages.heure_debut_tournee),
+                  en_secondes(tournee.heure_fin or reglages.heure_fin_tournee))
+    f = faisabilite(clients, Periode("tournee", debut, fin, fin), reglages, [t for _, t in lignes])
+    messages = []
+    if f.refuses:
+        messages.append(f"{len(f.refuses)} client(s) au-delà de {reglages.clients_max_par_heure} par heure sur leur "
+                        f"créneau ({', '.join(f.refuses)}) : risque de retard, répartissez-les sur une autre tournée.")
+    if f.depart_au_plus_tard_s is not None and f.depart_au_plus_tard_s < debut:
+        messages.append(f"Départ du dépôt nécessaire avant {en_heure(max(f.depart_au_plus_tard_s, 0))}, avant le "
+                        f"début de la période ({en_heure(debut)}) : premiers créneaux trop tôt ou trop éloignés.")
+    return messages
 
 
 def _tournee_modifiable(db: Session, reglages: Settings, tournee_id: int) -> Tournee:

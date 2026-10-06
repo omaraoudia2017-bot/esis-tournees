@@ -4,7 +4,7 @@ RGPD, tableau de bord, journal de sécurité.
 Le contrôle de rôle est appliqué à TOUT le routeur (un livreur reçoit 403 et sa tentative est
 journalisée). La logique est dans app/services/admin.py et app/services/import_csv.py.
 """
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
 from sqlalchemy import select
@@ -16,6 +16,7 @@ from app.core.config import get_settings
 from app.db.session import get_db
 from app.models import Client, JournalSecurite, Tournee, Utilisateur, Vehicule, Zone
 from app.models.enums import RoleUtilisateur, TypeCamion
+from app.optim.faisabilite import charge_par_heure
 from app.schemas.admin import (ApercuClient, BilanGeocodageVue, ClientExclu, ClientRepartition, ClientResume, CompteVue,
                                DemandeAjoutExistant, DemandeAnonymisation, DemandeApercu, DemandeCompte, DemandeCorrection,
                                DemandeGeocodage, DemandeImport, DemandeReattribution, DemandeRepartition,
@@ -228,15 +229,18 @@ def reattribuer_tournee(tournee_id: int, demande: DemandeReattribution, a: servi
 @router.post("/tournees", response_model=TourneeResume, status_code=201)
 def creer_tournee(demande: DemandeTournee, a: service.Acteur = Depends(acteur),
                   db: Session = Depends(get_db)):
-    """Attribue une tournée du jour à un livreur (clients dans l'ordre fourni : le livreur
-    l'optimise avec son bouton). Refus : véhicule incompatible, limite d'effectif, client déjà
-    planifié ce jour-là, client sans position."""
+    """Attribue une tournée à un livreur (clients dans l'ordre horaire de leurs créneaux : le livreur
+    l'optimise avec son bouton). Refus : véhicule incompatible, limite d'effectif (zone et période),
+    client déjà planifié ce jour-là, client sans position. Avertissements : créneaux surchargés
+    (plus de N clients par heure), départ du dépôt nécessaire avant le début de la période."""
     try:
         t = service.creer_tournee(db, a, get_settings(), demande.livreur_id, demande.clients,
                                   demande.date_tournee, demande.periode, demande.remplacer)
     except service.ErreurAdmin as e:
         raise _http(e) from None
-    return next(r for r in _resumes(service.lister_tournees(db, t.date_tournee)) if r.id == t.id)
+    resume = next(r for r in _resumes(service.lister_tournees(db, t.date_tournee)) if r.id == t.id)
+    resume.avertissements = service.avertissements_tournee(db, get_settings(), t)
+    return resume
 
 
 @router.get("/tournees/{tournee_id}", response_model=TourneeVue)
@@ -261,6 +265,11 @@ def ajouter_client_existant(tournee_id: int, demande: DemandeAjoutExistant,
 
 
 # --------------------------------------------------------------------------- répartition en tournées
+def _heure_s(secondes: int) -> time:
+    secondes = min(max(0, secondes), 24 * 3600 - 60)
+    return time(secondes // 3600, secondes % 3600 // 60)
+
+
 @router.post("/repartition/apercu", response_model=list[ApercuClient])
 def apercu_repartition(demande: DemandeApercu, db: Session = Depends(get_db)):
     """Code postal, ville et créneau des clients d'une liste (grille « code postal × heure »).
@@ -283,7 +292,8 @@ def proposer_repartition(demande: DemandeRepartition, db: Session = Depends(get_
     jour = demande.date_tournee or service.aujourdhui(reglages)
     if jour < service.aujourdhui(reglages):
         raise HTTPException(422, "Impossible de planifier une tournée dans le passé.")
-    prop = repartition_service.proposer(db, reglages, jour, demande.clients, demande.journee_continue)
+    prop = repartition_service.proposer(db, reglages, jour, demande.clients, demande.journee_continue,
+                                        demande.clients_par_heure)
     return PropositionRepartition(
         date_tournee=jour,
         groupes=[GroupeRepartition(
@@ -291,8 +301,13 @@ def proposer_repartition(demande: DemandeRepartition, db: Session = Depends(get_
             limite=g.limite, codes_postaux=g.codes_postaux,
             clients=[ClientRepartition(id_client=c.id_client, nom=c.nom_client, code_postal=c.code_postal,
                                        ville=c.ville, creneau_debut=c.creneau_debut, creneau_fin=c.creneau_fin,
-                                       type_camion_requis=c.type_camion_requis.value) for c in g.clients],
-            livreur_propose_id=g.livreur.id if g.livreur else None) for k, g in enumerate(prop.groupes, start=1)],
+                                       type_camion_requis=c.type_camion_requis.value,
+                                       heure_visee=g.heures.get(c.id_client)) for c in g.clients],
+            livreur_propose_id=g.livreur.id if g.livreur else None,
+            debut_periode=_heure_s(g.debut_periode_s),
+            depart_au_plus_tard=_heure_s(g.depart_au_plus_tard_s) if g.depart_au_plus_tard_s is not None else None,
+            charge_par_heure={str(h): n for h, n in charge_par_heure(list(g.heures.values())).items()})
+            for k, g in enumerate(prop.groupes, start=1)],
         livreurs_disponibles=[LivreurDisponible(id=u.id, identifiant=u.identifiant, nom=f"{u.prenom} {u.nom}",
                                                 vehicule=v.immatriculation, type_camion=v.type_camion.value)
                               for u, v in prop.livreurs],

@@ -10,7 +10,8 @@ from app.ml.variables import variables_client
 from app.models import Client
 from app.models.enums import TypeCamion
 from app.optim.cvrptw import optimiser_tournees
-from app.optim.matrice import Point, construire_matrice_depart
+from app.optim.faisabilite import depart_au_plus_tard_s, placer_par_heure
+from app.optim.matrice import Point, construire_matrice, construire_matrice_depart
 from app.optim.probleme import ClientTournee, ParcoursEvalue, ProblemeTournees, en_secondes
 from app.optim.segmentation import Periode, Segment, dimensionner, repartir_budget, segmenter
 
@@ -177,3 +178,33 @@ def planifier_journee(clients: list[Client], reglages: Settings, max_clients: in
 
     plan.duree_calcul_s = round(time.perf_counter() - debut, 2)
     return plan
+
+
+# --------------------------------------------------------------------------- faisabilité (avant optimisation)
+@dataclass
+class Faisabilite:
+    heures: dict[str, int]                 # identifiant client -> heure visée (8 = 8 h - 9 h)
+    refuses: list[str]                     # clients impossibles à placer (trop de clients sur leur créneau)
+    ordre: list[str]                       # ordre horaire proposé (heure visée, début, fin de créneau)
+    depart_au_plus_tard_s: int | None      # heure limite de départ du dépôt, dans cet ordre
+
+
+def faisabilite(clients: list[Client], periode: Periode, reglages: Settings,
+                temps_service_s: list[int] | None = None, par_heure: int | None = None) -> Faisabilite:
+    """Placement « N clients au plus par heure », ordre horaire et départ au plus tard du dépôt
+    (calculé dans l'ordre horaire : l'optimisation géographique ne peut que faire mieux ou pareil)."""
+    if not clients:
+        return Faisabilite({}, [], [], None)
+    temps = temps_service_s or [None] * len(clients)
+    en_tournee = [vers_client_tournee(c, reglages, t) for c, t in zip(clients, temps)]
+    places, refuses = placer_par_heure(en_tournee, periode, par_heure or reglages.clients_max_par_heure)
+    ordre = sorted(places, key=lambda i: (places[i], en_tournee[i].debut_s, en_tournee[i].fin_s))
+    depart = None
+    if ordre:
+        depot = Point(reglages.depot_latitude, reglages.depot_longitude)
+        points = [Point(float(clients[i].latitude), float(clients[i].longitude)) for i in ordre]
+        matrice = construire_matrice([depot, *points], reglages.coefficient_routier, reglages.vitesse_moyenne_kmh)
+        depart = depart_au_plus_tard_s(matrice, [en_tournee[i] for i in ordre])
+    return Faisabilite({clients[i].id_client: h for i, h in places.items()},
+                       [clients[i].id_client for i in refuses],
+                       [clients[i].id_client for i in ordre], depart)

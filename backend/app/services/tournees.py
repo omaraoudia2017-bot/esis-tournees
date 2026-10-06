@@ -24,6 +24,7 @@ from app.models import Client, Livraison, Tournee, Utilisateur, Vehicule, Zone
 from app.models.enums import (PrecisionGeocodage, SourceClient, StatutLivraison, StatutTournee,
                               TypeCamion, TypeClient)
 from app.optim.cvrptw import optimiser_tournees
+from app.optim.faisabilite import depart_au_plus_tard_s
 from app.optim.matrice import Point, construire_matrice, longueur_parcours
 from app.optim.probleme import JOURNEE_S, en_secondes, evaluer_parcours
 from app.services.domicile import position_domicile, trajet_domicile_depot
@@ -31,7 +32,7 @@ from app.services.geocodage import GeocoderServiceError, geocoder_avec_cache
 from app.services.journal import ContexteRequete, journaliser
 from app.services.nettoyage import (est_professionnel, extraire_acces, nettoyer_digicode,
                                     nettoyer_voie, normaliser_ville)
-from app.services.planification import construire_probleme, estimer_temps_service_s
+from app.services.planification import construire_probleme, estimer_temps_service_s, vers_client_tournee
 from app.services.referentiel import zone_id_pour
 
 EN_ATTENTE = (StatutLivraison.A_LIVRER, StatutLivraison.EN_COURS)
@@ -499,3 +500,20 @@ def annuler_demarrage(db: Session, livraison: Livraison, reglages: Settings, liv
     db.commit()
     db.refresh(livraison)
     return livraison
+
+
+# --------------------------------------------------------------------------- départ au plus tard
+def depart_au_plus_tard(tournee: Tournee, lignes: list[tuple[Livraison, Client]], reglages: Settings) -> time | None:
+    """Heure limite de départ du dépôt pour servir les clients dans l'ordre affiché (optimisé, sinon
+    horaire) avant la fin de leurs créneaux. Seulement avant le départ (tournée planifiée)."""
+    if tournee.statut != StatutTournee.PLANIFIEE:
+        return None
+    localises = [(l, c) for l, c in lignes if c.latitude is not None and l.statut == StatutLivraison.A_LIVRER]
+    if not localises:
+        return None
+    depot = Point(reglages.depot_latitude, reglages.depot_longitude)
+    matrice = construire_matrice([depot] + [Point(float(c.latitude), float(c.longitude)) for _, c in localises],
+                                 reglages.coefficient_routier, reglages.vitesse_moyenne_kmh)
+    clients = [vers_client_tournee(c, reglages, l.temps_service_predit_s) for l, c in localises]
+    secondes = depart_au_plus_tard_s(matrice, clients)
+    return time(*divmod(max(0, secondes) // 60, 60)) if secondes is not None else None

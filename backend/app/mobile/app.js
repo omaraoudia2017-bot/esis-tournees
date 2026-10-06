@@ -588,6 +588,13 @@ function ecranTournee() {
     corps.append(h("div", { classe: "itineraire alerte", texte: t.colis_a_rapporter + " colis non livré(s) à rapporter au dépôt." }));
   }
 
+  // Avant le départ : heure limite pour quitter le dépôt sans manquer un créneau
+  if (t.depart_depot_au_plus_tard) {
+    corps.append(h("div", { classe: "itineraire info" }, "Départ du dépôt au plus tard : ",
+      h("strong", { texte: t.depart_depot_au_plus_tard.slice(0, 5) }),
+      t.optimisee_le ? " (itinéraire optimisé)." : " (ordre horaire ; après « Optimiser », l'heure est recalculée)."));
+  }
+
   // Indicateurs
   let retourPrevu = "—";
   if (t.duree_estimee_min) {
@@ -609,13 +616,13 @@ function ecranTournee() {
       title: enCours ? "Terminez d'abord la livraison en cours." : null,
       texte: etat.calcul ? "Calcul de l'itinéraire…" : (demarree ? "Recalculer l'itinéraire restant" : "Optimiser"),
       onclick: optimiser }));
-    if (!t.optimisee_le) corps.append(h("p", { classe: "petit", texte: "Liste dans l'ordre d'attribution, pas encore optimisée." }));
+    if (!t.optimisee_le) corps.append(h("p", { classe: "petit", texte: "Liste dans l'ordre horaire des créneaux, pas encore optimisée." }));
     else if (aFaire.some((l) => l.ordre_passage === null)) corps.append(h("p", { classe: "petit", texte: "Nouvelle adresse ajoutée : appuyez sur le bouton ci-dessus pour l'intégrer au meilleur endroit." }));
   }
   if (t.statut !== "terminee") corps.append(formulaireAjout(t));
 
   corps.append(carteGeo(t), h("p", { classe: "tres-petit", style: { marginTop: "-6px" },
-    texte: "D : dépôt. " + (t.optimisee_le ? "Trait bleu : itinéraire optimisé." : "Pointillés gris : ordre d'attribution.") + (t.domicile ? " Pointillés verts : domicile → dépôt." : "") + " Tracé à vol d'oiseau." }));
+    texte: "D : dépôt. " + (t.optimisee_le ? "Trait bleu : itinéraire optimisé." : "Pointillés gris : ordre horaire.") + (t.domicile ? " Pointillés verts : domicile → dépôt." : "") + " Tracé à vol d'oiseau." }));
 
   const premier = aFaire.find((l) => l.statut === "a_livrer");
   if (aFaire.length) corps.append(h("h2", { classe: "section", texte: "À faire (" + aFaire.length + ")" }));
@@ -1154,6 +1161,10 @@ function ecranTourneeDate() {
     corps.append(boiteMessage({ type: "info", texte: t.date_tournee > aujourdhuiISO()
       ? "Tournée à venir, en consultation seule. L'ordre peut encore changer : vous l'optimiserez le jour même. Digicodes, téléphones et notes s'afficheront ce jour-là."
       : "Tournée passée, en consultation seule. Digicodes, téléphones et notes ne sont plus affichés." }));
+  }
+  if (t.depart_depot_au_plus_tard) {
+    corps.append(h("div", { classe: "itineraire info" }, "Départ du dépôt au plus tard (ordre actuel) : ",
+      h("strong", { texte: t.depart_depot_au_plus_tard.slice(0, 5) })));
   }
   const indicateur = (libelle, valeur) => h("div", { classe: "indicateur" }, h("div", { classe: "libelle", texte: libelle }), h("div", { classe: "valeur", texte: valeur }));
   corps.append(h("div", { classe: "indicateurs" },

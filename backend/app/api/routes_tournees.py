@@ -104,6 +104,7 @@ def vue_tournee(db: Session, t: Tournee, lecteur_id: int | None = None) -> Tourn
         domicile=Point(nom="Domicile", latitude=point_domicile.latitude, longitude=point_domicile.longitude)
         if point_domicile else None,
         trajet_domicile_depot_min=trajet[1] if trajet else None,
+        depart_depot_au_plus_tard=service.depart_au_plus_tard(t, lignes, reglages),
     )
 
 

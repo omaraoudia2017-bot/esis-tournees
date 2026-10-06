@@ -103,6 +103,11 @@ journée complète) et type de camion, coupe chaque groupe selon la limite de la
 livreur disponible (bon camion, pas encore de tournée ce jour-là). Chaque client peut être déplacé
 vers une autre tournée ou retiré ; on choisit le livreur, puis « Créer les tournées ». Les clients
 déjà planifiés ce jour-là ou non localisés sont écartés, avec le motif.
+Les tournées proposées sont **réalisables** : au plus 2 clients prévus dans une même heure (réglable),
+et une limite qui dépend de la période (matin 14, après-midi 12, soirée 10 ; 20 clients seulement sur
+la journée complète, sans dépasser la limite de la zone). Chaque tournée est rangée par ordre horaire
+(colonne « Passage visé ») et indique l'heure de **départ du dépôt au plus tard** ; le livreur
+optimise ensuite l'ordre géographique. Le livreur voit aussi cette heure de départ sur son écran.
 
 **Livreurs**
 - Créer un compte : un **code d'activation** est affiché dans un encadré jusqu'au clic sur « J'ai remis

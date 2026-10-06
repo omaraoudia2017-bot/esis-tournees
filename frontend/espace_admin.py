@@ -254,6 +254,9 @@ def suivi_tournee(resume: dict) -> None:
     t = api("GET", f"/admin/tournees/{resume['id']}")
     if t is None:
         return
+    if t.get("depart_depot_au_plus_tard"):
+        st.info(f"Départ du dépôt au plus tard : **{t['depart_depot_au_plus_tard'][:5]}** "
+                f"(période {t['heure_depart'][:5]}–{t['heure_fin'][:5]}, dans l'ordre affiché).")
     outils.carte_tournee(t)
     st.dataframe(pd.DataFrame([{
         "N°": l["ordre_passage"], "Client": l["client"]["nom"], "Ville": l["client"]["ville"],
@@ -330,6 +333,8 @@ def formulaire_tournee(jour: date) -> None:
             "periode": PERIODES[periode], "remplacer": remplacer})
         if t:
             st.session_state.jour_a_afficher = date.fromisoformat(t["date_tournee"])
+            if t.get("avertissements"):
+                annoncer("warning", "Tournée créée, à vérifier : " + " ".join(t["avertissements"]))
             annoncer("success", f"Tournée du {date.fromisoformat(t['date_tournee']):%d/%m/%Y} attribuée à "
                                 f"{t['livreur_nom']} le {date_heure(t['attribuee_le'])} : {t['nb_clients']} clients "
                                 f"(limite {t['max_clients']}). Le livreur l'optimise depuis son écran.")
@@ -519,7 +524,7 @@ def onglet_repartition() -> None:
                "vous ajustez, puis vous validez.")
     if bilan := st.session_state.pop("bilan_repartition", None):
         for ok, texte in bilan:
-            (st.success if ok else st.error)(texte)
+            (st.warning if ok == "alerte" else st.success if ok else st.error)(texte)
     st.session_state.setdefault("liste_repartition", list(st.session_state.get("ids_import", [])))
     liste = st.session_state.liste_repartition
 
@@ -564,15 +569,20 @@ def onglet_repartition() -> None:
 
     # ---- 2. classer et proposer
     st.subheader("2. Classer et proposer des tournées")
-    c1, c2, c3 = st.columns([1, 1, 1])
+    c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
     jour = c1.date_input("Date des tournées", value=date.today(), min_value=date.today(), format="DD/MM/YYYY",
                          key="rep_date")
     continue_ = c2.toggle("Journée complète (une seule plage)", key="rep_continue",
                           help="Par défaut, les clients sont séparés en matin, après-midi et soirée "
-                               "selon leur créneau, pour éviter de longues attentes.")
-    if c3.button("Classer et proposer", type="primary", disabled=not liste, width="stretch"):
+                               "selon leur créneau, pour éviter de longues attentes. Une tournée peut "
+                               "atteindre la limite de sa zone (20 au plus) seulement sur la journée complète.")
+    par_heure = c3.number_input("Clients maximum par heure", min_value=1, max_value=6, value=2, key="rep_par_heure",
+                                help="Une tournée ne prévoit jamais plus de clients dans une même heure "
+                                     "(8 h – 9 h, 9 h – 10 h…) : elle reste réalisable par le livreur.")
+    if c4.button("Classer et proposer", type="primary", disabled=not liste, width="stretch"):
         prop = api("POST", "/admin/repartition", timeout=30, json={
-            "date_tournee": jour.isoformat(), "clients": liste[:500], "journee_continue": continue_})
+            "date_tournee": jour.isoformat(), "clients": liste[:500], "journee_continue": continue_,
+            "clients_par_heure": int(par_heure)})
         if prop is not None:
             st.session_state.proposition = prop
             for cle in [k for k in st.session_state if str(k).startswith(("rep_g", "rep_l"))]:
@@ -611,9 +621,17 @@ def proposition(prop: dict) -> None:
     edites, choix_livreurs = {}, {}
     for g in groupes:
         n = g["numero"]
+        depart = (g["depart_au_plus_tard"] or "")[:5]
         titre = (f"Tournée {n} — {g['zone'] or 'zone non définie'} · {LIBELLES_PERIODE[g['periode']]} · camion "
-                 f"{g['type_camion']} · {len(g['clients'])} / {g['limite']} clients · CP {', '.join(g['codes_postaux'])}")
+                 f"{g['type_camion']} · {len(g['clients'])} / {g['limite']} clients · CP {', '.join(g['codes_postaux'])}"
+                 + (f" · départ du dépôt avant {depart}" if depart else ""))
         with st.expander(titre, expanded=len(groupes) <= 4):
+            charge = " · ".join(f"{h} h : {nb}" for h, nb in g["charge_par_heure"].items())
+            st.caption(f"Clients prévus par heure (ordre horaire) — {charge}. L'ordre géographique sera optimisé "
+                       "par le livreur.")
+            if depart and depart < (g["debut_periode"] or "")[:5]:
+                st.warning(f"Départ du dépôt nécessaire avant {depart}, avant le début de la période "
+                           f"({g['debut_periode'][:5]}) : premiers créneaux trop tôt ou trop éloignés.")
             compatibles = [l for l in livreurs if l["type_camion"] == g["type_camion"]]
             options = [None] + compatibles
             defaut = next((k for k, l in enumerate(options) if l and l["id"] == g["livreur_propose_id"]), 0)
@@ -622,12 +640,14 @@ def proposition(prop: dict) -> None:
                 format_func=lambda l: "— ne pas créer cette tournée —" if l is None
                 else f"{l['nom']} — {l['vehicule']} ({l['type_camion']})")
             df = pd.DataFrame([{
-                "Tournée": str(n), "Client": c["nom"], "Code postal": c["code_postal"], "Ville": c["ville"],
+                "Tournée": str(n),
+                "Passage visé": f"{c['heure_visee']} h – {c['heure_visee'] + 1} h" if c["heure_visee"] is not None else "",
                 "Créneau": f"{(c['creneau_debut'] or '')[:5]}–{(c['creneau_fin'] or '')[:5]}",
+                "Client": c["nom"], "Code postal": c["code_postal"], "Ville": c["ville"],
                 "id": c["id_client"]} for c in g["clients"]])
             edites[n] = st.data_editor(
-                df, key=f"rep_g{n}", hide_index=True, width="stretch", disabled=["Client", "Code postal", "Ville",
-                                                                                  "Créneau", "id"],
+                df, key=f"rep_g{n}", hide_index=True, width="stretch",
+                disabled=["Passage visé", "Client", "Code postal", "Ville", "Créneau", "id"],
                 column_config={"Tournée": st.column_config.SelectboxColumn(
                     "Tournée", options=numeros + [RETIRER], required=True,
                     help="Déplacer le client vers une autre tournée proposée, ou le retirer."),
@@ -660,6 +680,7 @@ def proposition(prop: dict) -> None:
             if ok:
                 crees.add(n)
                 bilan.append((True, f"Tournée {n} attribuée à {l['nom']} : {len(cible[n])} clients."))
+                bilan.extend(("alerte", f"Tournée {n} : {m}") for m in res.get("avertissements", []))
             else:
                 bilan.append((False, f"Tournée {n} ({l['nom']}) non créée : {res}"))
         # Les clients placés sortent de la liste ; les tournées en échec restent à corriger

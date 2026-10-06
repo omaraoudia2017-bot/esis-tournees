@@ -62,8 +62,14 @@ def test_classement_decoupage_et_livreurs(client, db, jeu, admin, liste):
 
     groupes = p["groupes"]
     cles = [(g["periode"], g["type_camion"], len(g["clients"])) for g in groupes]
-    # Matin normal : 25 clients pour une limite de 10 -> 3 tournées équilibrées (9, 8, 8)
-    assert sorted(n for per, t, n in cles if per == "matin" and t == "normal") == [8, 8, 9]
+    # Matin normal : 25 clients sur le créneau 8 h - 12 h, au plus 2 par heure -> 8 par tournée au plus
+    # (8 h, 9 h, 10 h, 11 h x 2) : 4 tournées réalisables au lieu d'une tournée de 10 intenable
+    assert sorted(n for per, t, n in cles if per == "matin" and t == "normal") == [1, 8, 8, 8]
+    assert all(max(g["charge_par_heure"].values()) <= 2 for g in groupes)
+    assert all(g["depart_au_plus_tard"] for g in groupes)
+    # Ordre horaire dans chaque tournée (heure visée croissante)
+    assert all([c["heure_visee"] for c in g["clients"]] == sorted(c["heure_visee"] for c in g["clients"])
+               for g in groupes)
     assert ("matin", "hayon", 2) in cles and ("apres-midi", "normal", 3) in cles
     # Matin avant après-midi ; aucun groupe ne dépasse sa limite ; chaque client placé une seule fois
     assert [g["periode"] for g in groupes].index("apres-midi") > [g["periode"] for g in groupes].index("matin")
@@ -102,10 +108,17 @@ def test_journee_complete_et_controles(client, db, jeu, admin, liste):
     p = client.post("/admin/repartition", headers=admin, json={
         "clients": liste, "journee_continue": True, "date_tournee": demain.isoformat()}).json()
     assert {g["periode"] for g in p["groupes"]} == {"journee"}
-    # 28 clients « normal » sur une seule plage -> 3 tournées ; 2 « hayon » -> 1
-    assert sorted(len(g["clients"]) for g in p["groupes"] if g["type_camion"] == "normal") == [9, 9, 10]
+    # 28 clients « normal » sur la journée : 2 par heure, 10 au plus (limite de la zone)
+    assert sorted(len(g["clients"]) for g in p["groupes"] if g["type_camion"] == "normal") == [1, 8, 9, 10]
     # Demain, test.livreur.a est libre
     assert "test.livreur.a" in {l["identifiant"] for l in p["livreurs_disponibles"]}
+
+    # Attribution manuelle de 10 clients du créneau 8 h - 12 h : acceptée, mais avec un avertissement
+    b = next(l["id"] for l in p["livreurs_disponibles"] if l["identifiant"] == "test.livreur.b")
+    r = client.post("/admin/tournees", headers=admin, json={
+        "livreur_id": b, "clients": liste[:10], "date_tournee": demain.isoformat(), "periode": "matin"})
+    assert r.status_code == 201, r.text
+    assert any("par heure" in m for m in r.json()["avertissements"])
 
     hier = aujourdhui(get_settings()) - timedelta(days=1)
     assert client.post("/admin/repartition", headers=admin, json={

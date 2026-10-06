@@ -119,6 +119,7 @@ class TourneeResume(BaseModel):
     optimisee: bool
     distance_totale_km: float | None
     attribuee_le: datetime | None = None       # date et heure à laquelle le planificateur l'a créée
+    avertissements: list[str] = []             # faisabilité (à la création) : créneaux surchargés, départ
 
 
 class DemandeTournee(BaseModel):
@@ -192,6 +193,7 @@ class DemandeRepartition(BaseModel):
     date_tournee: date | None = None
     clients: list[str] = Field(min_length=1, max_length=500)
     journee_continue: bool = False         # une seule plage (journée complète) au lieu de 3
+    clients_par_heure: int | None = Field(None, ge=1, le=6, description="par défaut : CLIENTS_MAX_PAR_HEURE (2)")
 
 
 class ClientRepartition(BaseModel):
@@ -202,6 +204,7 @@ class ClientRepartition(BaseModel):
     creneau_debut: time | None
     creneau_fin: time | None
     type_camion_requis: str
+    heure_visee: int | None = None         # 8 = passage prévu entre 8 h et 9 h (ordre horaire)
 
 
 class ApercuClient(ClientRepartition):
@@ -221,6 +224,9 @@ class GroupeRepartition(BaseModel):
     codes_postaux: list[str]
     clients: list[ClientRepartition]
     livreur_propose_id: int | None
+    debut_periode: time
+    depart_au_plus_tard: time | None       # départ du dépôt au plus tard (ordre horaire)
+    charge_par_heure: dict[str, int]       # {"8": 2, "9": 1, ...}
 
 
 class LivreurDisponible(BaseModel):
