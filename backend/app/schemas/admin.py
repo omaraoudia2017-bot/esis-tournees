@@ -215,6 +215,24 @@ class DemandeApercu(BaseModel):
     clients: list[str] = Field(min_length=1, max_length=500)
 
 
+class DemandeApercuTournee(BaseModel):
+    clients: list[str] = Field(min_length=1, max_length=40)
+    periode: Literal["matin", "apres-midi", "soiree", "journee"] = "matin"
+
+
+class ApercuTourneeVue(BaseModel):
+    zone: str | None
+    limite: int
+    debut_periode: time
+    fin_periode: time
+    clients: list[ClientRepartition]           # ordre horaire (heure visée), clients en trop à la fin
+    charge_par_heure: dict[str, int]
+    refuses: list[str]                         # au-delà de N clients par heure sur leur créneau
+    inconnus: list[str]
+    non_localises: list[str]
+    depart_au_plus_tard: time | None
+
+
 class GroupeRepartition(BaseModel):
     numero: int
     zone: str | None

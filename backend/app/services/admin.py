@@ -303,6 +303,39 @@ def creer_tournee(db: Session, acteur: Acteur, reglages: Settings, livreur_id: i
     return tournee
 
 
+@dataclass
+class ApercuTournee:
+    periode: Periode
+    zone: Zone | None
+    limite: int
+    clients: list[Client]                 # ordre horaire proposé, puis clients en trop sur leur créneau
+    heures: dict[str, int]
+    refuses: list[str]
+    inconnus: list[str]
+    non_localises: list[str]
+    depart_au_plus_tard_s: int | None
+
+
+def apercu_tournee(db: Session, reglages: Settings, ids_clients: list[str], periode: str) -> ApercuTournee:
+    """Ce que donnerait la tournée AVANT de l'attribuer : ordre horaire, heure visée de chaque client,
+    charge par heure, limite (zone et période), départ du dépôt au plus tard. N'enregistre rien."""
+    p = _periode(periode, reglages)
+    ids = list(dict.fromkeys(i.strip() for i in ids_clients if i.strip()))
+    trouves = {c.id_client: c for c in db.scalars(select(Client).where(Client.id_client.in_(ids),
+                                                                       Client.actif.is_(True)))}
+    inconnus = [i for i in ids if i not in trouves]
+    clients = [trouves[i] for i in ids if i in trouves]
+    localises = [c for c in clients if c.latitude is not None]
+    zone_id = Counter(c.zone_id for c in clients).most_common(1)[0][0] if clients else None
+    zone = db.get(Zone, zone_id) if zone_id else None
+    limite = limite_periode(p, zone.max_clients if zone else 15, reglages.clients_max_par_heure)
+    f = faisabilite(localises, p, reglages)
+    rang = {i: k for k, i in enumerate(f.ordre)}
+    ordonnes = sorted(localises, key=lambda c: rang.get(c.id_client, len(rang)))
+    return ApercuTournee(p, zone, limite, ordonnes, f.heures, f.refuses, inconnus,
+                         [c.id_client for c in clients if c.latitude is None], f.depart_au_plus_tard_s)
+
+
 def avertissements_tournee(db: Session, reglages: Settings, tournee: Tournee) -> list[str]:
     """Signaux de faisabilité (sans bloquer) : créneaux surchargés, départ trop matinal."""
     lignes = db.execute(select(Client, Livraison.temps_service_predit_s)

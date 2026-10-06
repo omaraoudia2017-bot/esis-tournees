@@ -17,7 +17,7 @@ from app.db.session import get_db
 from app.models import Client, JournalSecurite, Tournee, Utilisateur, Vehicule, Zone
 from app.models.enums import RoleUtilisateur, TypeCamion
 from app.optim.faisabilite import charge_par_heure
-from app.schemas.admin import (ApercuClient, BilanGeocodageVue, ClientExclu, ClientRepartition, ClientResume, CompteVue,
+from app.schemas.admin import (ApercuClient, ApercuTourneeVue, BilanGeocodageVue, DemandeApercuTournee, ClientExclu, ClientRepartition, ClientResume, CompteVue,
                                DemandeAjoutExistant, DemandeAnonymisation, DemandeApercu, DemandeCompte, DemandeCorrection,
                                DemandeGeocodage, DemandeImport, DemandeReattribution, DemandeRepartition,
                                DemandeTournee,
@@ -197,6 +197,24 @@ def _resumes(lignes) -> list[TourneeResume]:
 def lister_tournees(jour: date | None = Query(None, alias="date"), db: Session = Depends(get_db)):
     jour = jour or service.aujourdhui(get_settings())
     return _resumes(service.lister_tournees(db, jour))
+
+
+@router.post("/tournees/apercu", response_model=ApercuTourneeVue)
+def apercu_tournee(demande: DemandeApercuTournee, db: Session = Depends(get_db)):
+    """Aperçu d'une tournée avant attribution (ordre horaire, codes postaux, charge par heure,
+    départ du dépôt au plus tard). N'enregistre rien."""
+    reglages = get_settings()
+    a = service.apercu_tournee(db, reglages, demande.clients, demande.periode)
+    return ApercuTourneeVue(
+        zone=a.zone.nom if a.zone else None, limite=a.limite, debut_periode=_heure_s(a.periode.depart_s),
+        fin_periode=_heure_s(a.periode.fin_s),
+        clients=[ClientRepartition(id_client=c.id_client, nom=c.nom_client, code_postal=c.code_postal, ville=c.ville,
+                                   creneau_debut=c.creneau_debut, creneau_fin=c.creneau_fin,
+                                   type_camion_requis=c.type_camion_requis.value,
+                                   heure_visee=a.heures.get(c.id_client)) for c in a.clients],
+        charge_par_heure={str(h): n for h, n in charge_par_heure(list(a.heures.values())).items()},
+        refuses=a.refuses, inconnus=a.inconnus, non_localises=a.non_localises,
+        depart_au_plus_tard=_heure_s(a.depart_au_plus_tard_s) if a.depart_au_plus_tard_s is not None else None)
 
 
 @router.get("/tournees/en-attente", response_model=list[TourneeResume])
