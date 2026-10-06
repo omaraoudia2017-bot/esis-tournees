@@ -1,4 +1,5 @@
-"""Annuler l'attribution d'une tournée (« en attente »), la redonner à un autre livreur, et
+"""Annuler l'attribution d'une tournée (ses clients reviennent dans une tournée L), la redonner à un
+autre livreur, et
 calendrier du livreur (tournées passées et à venir, consultation seule hors du jour même).
 Base PostgreSQL réelle, transaction annulée à la fin de chaque test (voir conftest.py)."""
 from datetime import timedelta
@@ -32,39 +33,43 @@ def _traces(db, evenement, tournee_id):
 
 def test_annuler_l_attribution_puis_redonner(client, db, jeu, entetes):
     t = jeu["tournee"]
+    auj = aujourdhui(get_settings()).isoformat()
     r = client.post(f"/admin/tournees/{t.id}/desattribuer", headers=entetes["admin"])
     assert r.status_code == 200, r.text
-    assert r.json()["livreur"] is None and r.json()["nb_clients"] == 5
-    # L'ancien livreur ne la voit plus ; elle est listée « en attente » côté planificateur
+    l = r.json()
+    # Les clients reviennent dans une tournée L (période et camion déduits), la tournée datée disparaît
+    assert l["code"] == f"L{l['id']}" and l["nb_clients"] == 5 and l["type_camion"] == "hayon"
+    assert db.get(Tournee, t.id) is None
     assert client.get("/tournees/du-jour", headers=entetes["a"]).status_code == 404
-    assert t.id in [x["id"] for x in client.get("/admin/tournees/en-attente", headers=entetes["admin"]).json()]
-    jour = [x for x in client.get("/admin/tournees", headers=entetes["admin"]).json() if x["id"] == t.id]
-    assert jour and jour[0]["livreur_nom"] is None
-    assert client.get(f"/admin/tournees/{t.id}", headers=entetes["admin"]).status_code == 200
-    assert client.post(f"/admin/tournees/{t.id}/desattribuer", headers=entetes["admin"]).status_code == 409
-    assert len(_traces(db, "ADMIN_DESATTRIBUTION_TOURNEE", t.id)) == 1
+    assert l["id"] in [x["id"] for x in client.get("/admin/tournees-l", headers=entetes["admin"]).json()]
+    assert client.post(f"/admin/tournees/{t.id}/desattribuer", headers=entetes["admin"]).status_code == 404
+    trace = _traces_l(db, "ADMIN_DESATTRIBUTION_TOURNEE", t.id)
+    assert trace.details["cible"] == "test.livreur.a" and trace.details["tournee_l"] == l["code"]
 
-    # Redonner à B : refusé tant qu'un client exige un camion hayon (B a un camion normal)
+    # Redonner à B (camion normal) : refusé tant qu'un client exige un camion hayon ; on le retire
     b = _id_livreur(client, entetes, "test.livreur.b")
-    r = client.post(f"/admin/tournees/{t.id}/attribuer", json={"livreur_id": b}, headers=entetes["admin"])
+    attribution = {"date_tournee": auj, "livreur_id": b}
+    r = client.post(f"/admin/tournees-l/{l['id']}/attribuer", json=attribution, headers=entetes["admin"])
     assert r.status_code == 409 and "incompatible" in r.json()["detail"]
-    db.delete(db.scalar(select(Livraison).where(Livraison.tournee_id == t.id, Livraison.client_id == "8899000005")))
-    db.commit()
-    r = client.post(f"/admin/tournees/{t.id}/attribuer", json={"livreur_id": b}, headers=entetes["admin"])
-    assert r.status_code == 200 and r.json()["livreur"] == "test.livreur.b"
+    assert client.post(f"/admin/tournees-l/{l['id']}/clients/8899000005/deplacer", json={"vers": None},
+                       headers=entetes["admin"]).status_code == 204
+    r = client.post(f"/admin/tournees-l/{l['id']}/attribuer", json=attribution, headers=entetes["admin"])
+    assert r.status_code == 201, r.text
+    assert r.json()["livreur"] == "test.livreur.b" and r.json()["nb_clients"] == 4
     vue = client.get("/tournees/du-jour", headers=entetes["b"]).json()
-    assert vue["id"] == t.id and vue["optimisee_le"] is None
-    assert all(l["ordre_passage"] is None for l in vue["livraisons"])         # à réoptimiser par B
-    assert t.id not in [x["id"] for x in client.get("/admin/tournees/en-attente", headers=entetes["admin"]).json()]
-    trace = _traces(db, "ADMIN_REATTRIBUTION_TOURNEE", t.id)[0]
-    assert trace.details["cible"] == "test.livreur.b" and trace.details["ancien"] is None
+    assert vue["optimisee_le"] is None and all(x["ordre_passage"] is None for x in vue["livraisons"])
+    assert l["id"] not in [x["id"] for x in client.get("/admin/tournees-l", headers=entetes["admin"]).json()]
 
-    # Transfert direct de B vers A (sans passer par « en attente »)
+    # Transfert direct de B vers A (sans repasser par une tournée L)
     a = _id_livreur(client, entetes, "test.livreur.a")
-    r = client.post(f"/admin/tournees/{t.id}/attribuer", json={"livreur_id": a}, headers=entetes["admin"])
+    r = client.post(f"/admin/tournees/{vue['id']}/attribuer", json={"livreur_id": a}, headers=entetes["admin"])
     assert r.status_code == 200 and r.json()["livreur"] == "test.livreur.a"
     assert client.get("/tournees/du-jour", headers=entetes["b"]).status_code == 404
-    assert _traces(db, "ADMIN_REATTRIBUTION_TOURNEE", t.id)[-1].details["ancien"] == "test.livreur.b"
+    assert _traces(db, "ADMIN_REATTRIBUTION_TOURNEE", vue["id"])[-1].details["ancien"] == "test.livreur.b"
+
+
+def _traces_l(db, evenement, tournee_id):
+    return _traces(db, evenement, tournee_id)[-1]
 
 
 def test_controles_d_attribution(client, db, jeu, entetes):
@@ -95,7 +100,7 @@ def test_controles_d_attribution(client, db, jeu, entetes):
     assert client.post("/admin/tournees/999999/desattribuer", headers=admin).status_code == 404
     # Réservé au planificateur
     assert client.post(f"/admin/tournees/{tournee_a}/desattribuer", headers=entetes["a"]).status_code == 403
-    assert client.get("/admin/tournees/en-attente", headers=entetes["a"]).status_code == 403
+    assert client.get("/admin/tournees-l", headers=entetes["a"]).status_code == 403
 
 
 def test_calendrier_du_livreur(client, db, jeu, entetes):

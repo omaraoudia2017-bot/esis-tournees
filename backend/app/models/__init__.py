@@ -5,11 +5,12 @@ from app.models.journal import JournalSecurite
 from app.models.referentiel import Vehicule, Zone, ZoneCodePostal
 from app.models.remarque import RemarqueClient
 from app.models.tournee import Livraison, Tournee
+from app.models.tournee_l import ClientTourneeL, TourneeL
 from app.models.trajets import EtapeTrajet, JourneeTrajets
 from app.models.utilisateur import CodeSecours, JetonRevoque, Utilisateur
 
 __all__ = [
-    "CacheGeocodage", "Client", "CodeSecours", "EtapeTrajet", "JetonRevoque", "JournalSecurite",
+    "CacheGeocodage", "Client", "ClientTourneeL", "CodeSecours", "EtapeTrajet", "JetonRevoque", "JournalSecurite",
     "JourneeTrajets", "Livraison",
-    "RemarqueClient", "Tournee", "Utilisateur", "Vehicule", "Zone", "ZoneCodePostal",
+    "RemarqueClient", "Tournee", "TourneeL", "Utilisateur", "Vehicule", "Zone", "ZoneCodePostal",
 ]

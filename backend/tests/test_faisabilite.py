@@ -55,17 +55,3 @@ def test_depart_au_plus_tard_affiche_au_livreur(client, db, jeu):
     vue = client.get("/tournees/du-jour", headers=entete(connecter(client, "test.livreur.a", jeu["secrets"]["a"]))).json()
     assert vue["statut"] == "planifiee" and vue["depart_depot_au_plus_tard"] is not None
 
-
-def test_apercu_avant_attribution(client, db, jeu):
-    admin = entete(connecter(client, "test.admin.j7", jeu["secrets"]["admin"]))
-    ids = [f"88990000{k:02d}" for k in range(1, 6)] + ["0000000000"]
-    r = client.post("/admin/tournees/apercu", headers=admin, json={"clients": ids, "periode": "matin"})
-    assert r.status_code == 200, r.text
-    a = r.json()
-    assert a["inconnus"] == ["0000000000"] and len(a["clients"]) == 5 and a["limite"] == 14   # matin : 7 h x 2
-    heures = [c["heure_visee"] for c in a["clients"]]
-    assert heures == sorted(heures) and max(a["charge_par_heure"].values()) <= 2           # ordre horaire
-    assert a["depart_au_plus_tard"] is not None and a["refuses"] == []
-    # N'enregistre rien ; réservé au planificateur
-    livreur = entete(connecter(client, "test.livreur.b", jeu["secrets"]["b"]))
-    assert client.post("/admin/tournees/apercu", headers=livreur, json={"clients": ids}).status_code == 403

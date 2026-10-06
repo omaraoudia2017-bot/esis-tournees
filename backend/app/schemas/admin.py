@@ -189,14 +189,7 @@ class TableauDeBordVue(BaseModel):
     par_tournee: list[dict]
 
 
-# --------------------------------------------------------------------------- répartition en tournées
-class DemandeRepartition(BaseModel):
-    date_tournee: date | None = None
-    clients: list[str] = Field(min_length=1, max_length=500)
-    journee_continue: bool = False         # une seule plage (journée complète) au lieu de 3
-    clients_par_heure: int | None = Field(None, ge=1, le=6, description="par défaut : CLIENTS_MAX_PAR_HEURE (2)")
-
-
+# --------------------------------------------------------------------------- clients d'une tournée L
 class ClientRepartition(BaseModel):
     id_client: str
     nom: str
@@ -208,64 +201,9 @@ class ClientRepartition(BaseModel):
     heure_visee: int | None = None         # 8 = passage prévu entre 8 h et 9 h (ordre horaire)
 
 
-class ApercuClient(ClientRepartition):
-    localise: bool
-
-
-class DemandeApercu(BaseModel):
-    clients: list[str] = Field(min_length=1, max_length=500)
-
-
-class DemandeApercuTournee(BaseModel):
-    clients: list[str] = Field(min_length=1, max_length=40)
-    periode: Literal["matin", "apres-midi", "soiree", "journee"] = "matin"
-
-
-class ApercuTourneeVue(BaseModel):
-    zone: str | None
-    limite: int
-    debut_periode: time
-    fin_periode: time
-    clients: list[ClientRepartition]           # ordre horaire (heure visée), clients en trop à la fin
-    charge_par_heure: dict[str, int]
-    refuses: list[str]                         # au-delà de N clients par heure sur leur créneau
-    inconnus: list[str]
-    non_localises: list[str]
-    depart_au_plus_tard: time | None
-
-
-class GroupeRepartition(BaseModel):
-    numero: int
-    zone: str | None
-    periode: Literal["matin", "apres-midi", "soiree", "journee"]
-    type_camion: str
-    limite: int
-    codes_postaux: list[str]
-    clients: list[ClientRepartition]
-    livreur_propose_id: int | None
-    debut_periode: time
-    depart_au_plus_tard: time | None       # départ du dépôt au plus tard (ordre horaire)
-    charge_par_heure: dict[str, int]       # {"8": 2, "9": 1, ...}
-
-
-class LivreurDisponible(BaseModel):
-    id: int
-    identifiant: str
-    nom: str
-    vehicule: str
-    type_camion: str
-
-
 class ClientExclu(BaseModel):
     id_client: str
     motif: str
-
-
-class PropositionRepartition(BaseModel):
-    date_tournee: date
-    groupes: list[GroupeRepartition]
-    livreurs_disponibles: list[LivreurDisponible]
-    exclus: list[ClientExclu]
 
 
 # --------------------------------------------------------------------------- planning des livreurs
@@ -299,4 +237,48 @@ class PlanningVue(BaseModel):
     jours: list[date]
     livreurs: list[LivreurPlanning]
     cases: list[CasePlanning]
-    a_attribuer: list[TourneeResume]           # tournées en attente d'un livreur (à venir)
+    a_attribuer: list["TourneeLVue"]           # tournées L préparées, pas encore attribuées
+
+
+# --------------------------------------------------------------------------- tournées « L »
+class TourneeLVue(BaseModel):
+    id: int
+    code: str                                  # « L12 »
+    periode: Literal["matin", "apres-midi", "soiree", "journee"]
+    periode_proposee: str                      # période choisie à l'import
+    zone: str | None
+    type_camion: str
+    limite: int
+    nb_clients: int
+    codes_postaux: list[str]
+    cree_le: datetime
+    debut_periode: time
+    fin_periode: time
+    clients: list[ClientRepartition]           # ordre horaire (heure visée)
+    charge_par_heure: dict[str, int]
+    refuses: list[str]                         # au-delà de N clients par heure
+    depart_au_plus_tard: time | None
+
+
+class DemandeGenerationL(BaseModel):
+    clients: list[str] = Field(min_length=1, max_length=2000)
+    journee_continue: bool = False
+
+
+class ReponseGenerationL(BaseModel):
+    tournees: list[TourneeLVue]
+    exclus: list[ClientExclu]
+
+
+class DemandeAttributionL(BaseModel):
+    date_tournee: date
+    livreur_id: int
+    periode: Literal["matin", "apres-midi", "soiree", "journee"] | None = None
+    heure_depart: time | None = None           # départ du dépôt imposé (sinon début de la période)
+
+
+class DemandeDeplacementL(BaseModel):
+    vers: int | None = None                    # identifiant de la tournée L cible ; null = retirer
+
+
+PlanningVue.model_rebuild()

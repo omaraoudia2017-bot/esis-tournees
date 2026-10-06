@@ -1,5 +1,9 @@
-"""Espace administrateur (module 4) : tableau de bord, tournées du jour, import CSV, livreurs,
-clients (correction, RGPD), sécurité.
+"""Espace administrateur (module 4), en 5 rubriques :
+  - Tournées : importer un fichier de clients -> tournées L1, L2… réalisables -> visualiser, choisir la date,
+    le livreur (et si besoin la période, l'heure de départ, les clients) -> attribuer ;
+  - Planning : semaine par livreur, attribution en un clic, suivi en direct, changement de livreur ;
+  - Livreurs (comptes, codes d'activation, camions) ; Clients (corrections, RGPD) ;
+  - Tableau de bord et sécurité (indicateurs, alertes de l'IA, journal).
 
 Appelé par app.py, qui fournit les outils communs (appel à l'API, session, carte de tournée).
 Toutes les règles (droits, refus, journal) sont appliquées par l'API : cet écran ne fait qu'afficher.
@@ -12,14 +16,13 @@ import pandas as pd
 import streamlit as st
 from streamlit_folium import st_folium
 
-ONGLETS = ["Tableau de bord", "Planning", "Tournées du jour", "Import CSV", "Répartition", "Livreurs", "Clients",
-           "Sécurité"]
+ONGLETS = ["Tournées", "Planning", "Livreurs", "Clients", "Tableau de bord et sécurité"]
 STATUTS_TOURNEE = {"planifiee": "Planifiée", "en_cours": "En cours", "terminee": "Terminée"}
 LIBELLES_STATUT = {"a_livrer": "À livrer", "en_cours": "En cours", "livre": "Livré", "absent": "Absent",
                    "refuse": "Refusé", "reporte": "À reporter"}
 TYPES_LIVREUR = {"Livreur interne": "interne", "Livreur prestataire": "prestataire"}
-PERIODES = {"Matin (7 h – 14 h)": "matin", "Après-midi (13 h – 19 h)": "apres-midi",
-            "Soirée (17 h – 22 h)": "soiree", "Journée complète": "journee"}
+LIBELLES_PERIODE = {"matin": "Matin (7 h – 14 h)", "apres-midi": "Après-midi (13 h – 19 h)",
+                    "soiree": "Soirée (17 h – 22 h)", "journee": "Journée complète (7 h – 22 h)"}
 EVENEMENTS = ["(tous)", "CONNEXION_ANORMALE", "CONNEXION_ECHEC", "CONNEXION_REUSSIE", "COMPTE_VERROUILLE",
               "ACCES_REFUSE", "IMPORT_CSV", "ADMIN_CREATION_COMPTE", "ADMIN_DESACTIVER",
               "ADMIN_REINITIALISER_MDP", "ADMIN_REINITIALISER_2FA", "ADMIN_ATTRIBUTION_TOURNEE",
@@ -28,7 +31,8 @@ EVENEMENTS = ["(tous)", "CONNEXION_ANORMALE", "CONNEXION_ECHEC", "CONNEXION_REUS
               "CONDITIONS_ACCEPTEES", "ADMIN_TYPE_LIVREUR", "DOMICILE_MODIFIE", "DOMICILE_SUPPRIME",
               "TRAJET_ETAPE_AJOUTEE", "TRAJET_ETAPE_SUPPRIMEE", "TRAJETS_OPTIMISES",
               "CODE_ACTIVATION_VALIDE", "MOT_DE_PASSE_DEFINI", "ADMIN_DESATTRIBUTION_TOURNEE",
-              "ADMIN_REATTRIBUTION_TOURNEE"]
+              "ADMIN_REATTRIBUTION_TOURNEE", "TOURNEES_L_GENEREES", "TOURNEE_L_MODIFIEE", "TOURNEE_L_SUPPRIMEE",
+              "TOURNEE_L_ATTRIBUEE"]
 
 outils = None          # fourni par app.py : appel_api, reinitialiser, carte_tournee, heure_locale
 
@@ -136,8 +140,7 @@ def onglet_tableau_de_bord() -> None:
                "la performance individuelle des livreurs.")
 
 
-# --------------------------------------------------------------------------- tournées du jour
-EN_ATTENTE = "— en attente d'un livreur —"
+# --------------------------------------------------------------------------- outils communs (livreurs, suivi)
 JOURS_SEMAINE = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
 
 
@@ -169,72 +172,26 @@ def donner_a_un_livreur(t: dict, cle: str, sauf: str | None = None) -> None:
                            placeholder="Choisir un livreur",
                            format_func=lambda c: libelle_livreur(c, occupes, jour))
     if choix and choix["identifiant"] in occupes:
-        st.warning(f"{choix['prenom']} {choix['nom']} a déjà une tournée le {jour:%d/%m/%Y} : retirez-la "
-                   "d'abord (elle passera en attente) ou choisissez un autre livreur.")
+        st.warning(f"{choix['prenom']} {choix['nom']} a déjà une tournée le {jour:%d/%m/%Y} : annulez-la d'abord "
+                   "(ses clients reviendront dans une tournée L) ou choisissez un autre livreur.")
     if col2.button("Attribuer", key=f"btn_donner_{cle}", type="primary", width="stretch",
                    disabled=not choix or choix["identifiant"] in occupes):
         res = api("POST", f"/admin/tournees/{t['id']}/attribuer", json={"livreur_id": choix["id"]})
         if res:
-            st.session_state.jour_a_afficher = jour
             annoncer("success", f"Tournée du {jour:%d/%m/%Y} attribuée à {res['livreur_nom']}. Elle apparaît "
                                 "dans son application ; il doit l'optimiser (l'ordre précédent a été effacé).")
 
 
-def tournees_en_attente() -> None:
-    attente = api("GET", "/admin/tournees/en-attente") or []
-    if not attente:
-        return
-    with st.container(border=True):
-        st.markdown(f"#### Tournées en attente d'un livreur ({len(attente)})")
-        st.caption("Attribution annulée : les clients et la date sont conservés. Choisissez un livreur libre ce "
-                   "jour-là et équipé du bon camion.")
-        for t in attente:
-            j = date.fromisoformat(t["date_tournee"])
-            st.markdown(f"**{JOURS_SEMAINE[j.weekday()]} {j:%d/%m/%Y}** · {t['zone'] or 'zone non définie'} · "
-                        f"{(t['heure_depart'] or '')[:5]}–{(t['heure_fin'] or '')[:5]} · {t['nb_clients']} clients")
-            donner_a_un_livreur(t, f"attente_{t['id']}")
-
-
-def onglet_tournees() -> None:
-    tournees_en_attente()
-    # Après une attribution : la liste s'ouvre sur le jour de la tournée créée
-    if jour_cree := st.session_state.pop("jour_a_afficher", None):
-        st.session_state.tournees_jour = jour_cree
-    jour = st.date_input("Jour affiché", value=date.today(), format="DD/MM/YYYY", key="tournees_jour")
-    tournees = api("GET", "/admin/tournees", params={"date": jour.isoformat()})
-    if tournees is None:
-        return
-    st.subheader(f"Tournées du {jour:%d/%m/%Y} ({len(tournees)})")
-    if tournees:
-        st.dataframe(pd.DataFrame([{
-            "Livreur": t["livreur_nom"] or EN_ATTENTE,
-            "Camion": f"{t['vehicule']} ({t['type_camion']})" if t["vehicule"] else "—",
-            "Zone": t["zone"], "Période": f"{(t['heure_depart'] or '')[:5]}–{(t['heure_fin'] or '')[:5]}",
-            "Statut": STATUTS_TOURNEE.get(t["statut"], t["statut"]),
-            "Clients": f"{t['nb_clients']} / {t['max_clients']}", "Pointés": t["nb_terminees"],
-            "À reporter": t["nb_a_reporter"], "Optimisée": "oui" if t["optimisee"] else "non",
-            "km": nombre_fr(t["distance_totale_km"]) if t["distance_totale_km"] is not None else "—",
-            "Attribuée le": date_heure(t.get("attribuee_le"))}
-            for t in tournees]), hide_index=True, width="stretch")
-        choix = st.selectbox("Suivre ou modifier une tournée", tournees, index=None, placeholder="Choisir un livreur",
-                             format_func=lambda t: f"{t['livreur_nom'] or EN_ATTENTE} — {t['nb_clients']} clients")
-        if choix:
-            suivi_tournee(choix)
-    else:
-        st.info(f"Aucune tournée le {jour:%d/%m/%Y}.")
-    journees_de_trajets(jour)
-    st.divider()
-    formulaire_tournee(jour)
-
 POINTS = {"depot": "Dépôt", "domicile": "Domicile"}
 
 
-def journees_de_trajets(jour: date) -> None:
+def journees_de_trajets(jour: date, livreur_nom: str | None = None) -> None:
     """Lecture seule : étapes saisies par les livreurs qui n'ont pas de tournée ce jour-là."""
-    journees = api("GET", "/admin/trajets", params={"date": jour.isoformat()})
+    journees = [j for j in api("GET", "/admin/trajets", params={"date": jour.isoformat()}) or []
+                if livreur_nom is None or j["livreur_nom"] == livreur_nom]
     if not journees:
         return
-    st.subheader(f"Journées de trajets, sans tournée ({len(journees)})")
+    st.subheader(f"Journée de trajets du {jour:%d/%m/%Y}")
     st.caption("Étapes saisies par le livreur lui-même (garage, contrôle technique…). Consultation seule.")
     for j in journees:
         resume = (f"{j['livreur_nom']} — {len(j['etapes'])} étape(s), {j['nb_faites']} faite(s) — "
@@ -271,16 +228,18 @@ def suivi_tournee(resume: dict) -> None:
     modifiable = resume["statut"] == "planifiee" and date.fromisoformat(resume["date_tournee"]) >= date.today()
     if modifiable:
         with st.container(border=True):
-            st.markdown("**Livreur de la tournée** : " + (resume["livreur_nom"] or EN_ATTENTE))
+            st.markdown("**Livreur de la tournée** : " + (resume["livreur_nom"] or "—"))
             donner_a_un_livreur(resume, f"suivi_{resume['id']}", sauf=resume["livreur"])
             if resume["livreur"]:
                 confirme = st.checkbox("Je confirme le retrait du livreur", key=f"confirme_retrait_{resume['id']}")
-                if st.button("Annuler l'attribution (la tournée passe en attente)", disabled=not confirme,
+                if st.button("Annuler l'attribution (les clients reviennent dans une tournée L)", disabled=not confirme,
                              key=f"retrait_{resume['id']}", width="stretch"):
-                    if api("POST", f"/admin/tournees/{resume['id']}/desattribuer"):
-                        annoncer("success", f"Attribution annulée : la tournée du "
-                                            f"{date.fromisoformat(resume['date_tournee']):%d/%m/%Y} est en attente "
-                                            f"et n'apparaît plus chez {resume['livreur_nom']}.")
+                    l = api("POST", f"/admin/tournees/{resume['id']}/desattribuer")
+                    if l:
+                        st.session_state.pop("planning_detail", None)
+                        annoncer("success", f"Attribution annulée : la tournée n'apparaît plus chez "
+                                            f"{resume['livreur_nom']}. Ses {l['nb_clients']} clients sont dans la "
+                                            f"tournée {l['code']}, à attribuer (rubrique Tournées).")
     elif resume["statut"] != "terminee":
         st.caption("Tournée commencée : son livreur ne peut plus être changé.")
     if resume["statut"] != "terminee" and resume["livreur"]:
@@ -291,90 +250,6 @@ def suivi_tournee(resume: dict) -> None:
                 if api("POST", f"/admin/tournees/{resume['id']}/clients", attendu=(201,),
                        json={"id_client": ident.strip()}):
                     annoncer("success", "Client ajouté : le livreur doit relancer l'optimisation.")
-
-
-def formulaire_tournee(jour: date) -> None:
-    st.subheader("Attribuer une tournée")
-    livreurs = livreurs_actifs()
-    if not livreurs:
-        st.info("Aucun livreur actif : créez d'abord un compte (onglet Livreurs).")
-        return
-    ids_import = st.session_state.get("ids_import", [])
-    # Date et livreur d'abord : la liste indique qui a déjà une tournée ce jour-là
-    col_date, col_livreur = st.columns([1, 2])
-    date_tournee = col_date.date_input("Date de la tournée", value=max(jour, date.today()), min_value=date.today(),
-                                       format="DD/MM/YYYY", key="form_date_tournee",
-                                       help="Jour où le livreur effectuera la tournée.")
-    occupes = occupation(date_tournee)
-    livreur = col_livreur.selectbox("Livreur", sorted(livreurs, key=lambda c: c["identifiant"] in occupes),
-                                    key="form_livreur", format_func=lambda c: libelle_livreur(c, occupes, date_tournee))
-    existante = occupes.get(livreur["identifiant"])
-    remplacer = False
-    if existante:
-        st.warning(f"{livreur['prenom']} {livreur['nom']} a déjà une tournée le {date_tournee:%d/%m/%Y} "
-                   f"({existante['nb_clients']} clients, {STATUTS_TOURNEE.get(existante['statut'], existante['statut']).lower()}). "
-                   "Choisissez un autre livreur, ou cochez la case ci-dessous pour la remplacer.")
-        remplacer = st.checkbox(f"Remplacer sa tournée du {date_tournee:%d/%m/%Y} (ses {existante['nb_clients']} clients "
-                                "ne seront plus planifiés ce jour-là)", key="form_remplacer")
-    col_periode, col_info = st.columns([1, 2])
-    periode = col_periode.selectbox("Période", list(PERIODES), key="form_periode")
-    col_info.caption("Pour répartir une liste importée en plusieurs tournées réalisables, utilisez plutôt la "
-                     "rubrique « Répartition » (tableau des tournées proposées, détail, choix du livreur).")
-    texte = st.text_area("Identifiants des clients (un par ligne ; limite selon la zone et la période)",
-                         value="\n".join(ids_import[:20]), height=130, key="form_ids",
-                         help="Pré-rempli avec les clients du dernier import. L'aperçu ci-dessous se met à jour "
-                              "quand vous quittez le champ.")
-    ids = list(dict.fromkeys(x.strip() for x in texte.replace(",", "\n").splitlines() if x.strip()))
-    apercu = None
-    if ids:
-        apercu = api("POST", "/admin/tournees/apercu", json={"clients": ids[:40], "periode": PERIODES[periode]})
-    if apercu:
-        apercu_formulaire(apercu, len(ids))
-    trop = bool(apercu) and len(ids) > apercu["limite"]
-    nom = f"{livreur['prenom']} {livreur['nom']}"
-    if st.button(f"Attribuer la tournée du {date_tournee:%d/%m/%Y} à {nom}", type="primary", width="stretch",
-                 disabled=not ids or trop or (bool(existante) and not remplacer)):
-        t = api("POST", "/admin/tournees", attendu=(201,), timeout=30, json={
-            "livreur_id": livreur["id"], "clients": ids, "date_tournee": date_tournee.isoformat(),
-            "periode": PERIODES[periode], "remplacer": remplacer})
-        if t:
-            st.session_state.jour_a_afficher = date.fromisoformat(t["date_tournee"])
-            if t.get("avertissements"):
-                annoncer("warning", "Tournée créée, à vérifier : " + " ".join(t["avertissements"]))
-            annoncer("success", f"Tournée du {date.fromisoformat(t['date_tournee']):%d/%m/%Y} attribuée à "
-                                f"{t['livreur_nom']} le {date_heure(t['attribuee_le'])} : {t['nb_clients']} clients "
-                                f"(limite {t['max_clients']}). Le livreur l'optimise depuis son écran.")
-
-
-def apercu_formulaire(a: dict, nb_saisis: int) -> None:
-    """Tableau de la tournée avant attribution : heure visée, créneau, client, code postal, ville."""
-    with st.container(border=True):
-        depart = (a["depart_au_plus_tard"] or "")[:5]
-        charge = " · ".join(f"{h} h : {nb}" for h, nb in a["charge_par_heure"].items())
-        st.markdown(f"**Aperçu de la tournée** — {len(a['clients'])} client(s) / limite {a['limite']} "
-                    f"({a['zone'] or 'zone non définie'}, {a['debut_periode'][:5]}–{a['fin_periode'][:5]})"
-                    + (f" · départ du dépôt avant **{depart}**" if depart else ""))
-        if charge:
-            st.caption(f"Clients prévus par heure — {charge}. Ordre horaire ; le livreur optimisera l'ordre "
-                       "géographique.")
-        refuses = set(a["refuses"])
-        st.dataframe(pd.DataFrame([{
-            "Passage visé": f"{c['heure_visee']} h – {c['heure_visee'] + 1} h" if c["heure_visee"] is not None
-            else "créneau saturé",
-            "Créneau": f"{(c['creneau_debut'] or '')[:5]}–{(c['creneau_fin'] or '')[:5]}",
-            "Client": c["nom"], "Code postal": c["code_postal"], "Ville": c["ville"],
-            "Camion": "hayon" if c["type_camion_requis"] == "hayon" else "normal", "Identifiant": c["id_client"]}
-            for c in a["clients"]]), hide_index=True, width="stretch")
-        if nb_saisis > a["limite"]:
-            st.error(f"{nb_saisis} clients pour une limite de {a['limite']} : retirez-en {nb_saisis - a['limite']}.")
-        if refuses:
-            st.warning(f"{len(refuses)} client(s) au-delà de 2 par heure sur leur créneau : risque de retard.")
-        if depart and depart < a["debut_periode"][:5]:
-            st.warning(f"Départ du dépôt nécessaire avant {depart}, avant le début de la période.")
-        if a["inconnus"]:
-            st.error("Identifiants inconnus : " + ", ".join(a["inconnus"]))
-        if a["non_localises"]:
-            st.error("Clients sans position (géocodage à faire) : " + ", ".join(a["non_localises"]))
 
 
 # --------------------------------------------------------------------------- planning des livreurs
@@ -390,24 +265,6 @@ def plage_texte(debut: str | None, fin: str | None) -> str:
         return "Journée"
     d, f = int(debut[:2]), int(fin[:2])
     return PLAGES.get((d, f), f"{d} h–{f} h")
-
-
-def tournees_proposees_restantes() -> list[dict]:
-    """Tournées proposées dans « Répartition » et pas encore attribuées (gardées pour la session)."""
-    prop = st.session_state.get("proposition")
-    if not prop:
-        return []
-    fiches = {c["id_client"]: c for g in prop["groupes"] for c in g["clients"]}
-    aff = st.session_state.get("affectation") or {c["id_client"]: g["numero"] for g in prop["groupes"]
-                                                  for c in g["clients"]}
-    attribuees = st.session_state.get("attribuees", {})
-    restantes = []
-    for g in prop["groupes"]:
-        ids = [i for i, n in aff.items() if n == g["numero"]]
-        if ids and g["numero"] not in attribuees:
-            restantes.append({**g, "ids": ids, "date": prop["date_tournee"],
-                              "creneaux": sorted(fiches[i]["creneau_debut"] or "07:00" for i in ids)})
-    return restantes
 
 
 def onglet_planning() -> None:
@@ -429,45 +286,22 @@ def onglet_planning() -> None:
     if p is None:
         return
 
-    # ---- tournées à attribuer (en attente + proposées dans « Répartition »)
-    bac: dict[str, dict] = {}
-    for t in p["a_attribuer"]:
-        bac[f"attente:{t['id']}"] = {
-            "nature": "attente", "id": t["id"], "date": t["date_tournee"], "zone": t["zone"],
-            "plage": plage_texte(t["heure_depart"], t["heure_fin"]), "nb": t["nb_clients"],
-            "camion": t["type_camion_requis"] or "normal", "origine": "attribution annulée"}
-    for g in tournees_proposees_restantes():
-        if date.fromisoformat(g["date"]) >= aujourdhui:
-            bac[f"prop:{g['numero']}"] = {
-                "nature": "proposee", "numero": g["numero"], "date": g["date"], "zone": g["zone"],
-                "plage": LIBELLES_PERIODE[g["periode"]], "nb": len(g["ids"]), "camion": g["type_camion"],
-                "periode": g["periode"], "ids": g["ids"], "origine": f"proposée n° {g['numero']}",
-                "depart": (g["depart_au_plus_tard"] or "")[:5]}
-
-    def libelle_bac(cle: str) -> str:
-        if cle == "":
-            return "— aucune (consulter le planning) —"
-        b = bac[cle]
-        j = date.fromisoformat(b["date"])
-        return (f"{JOURS_SEMAINE[j.weekday()]} {j:%d/%m} · {b['plage']} · {b['zone'] or 'zone ?'} · {b['nb']} clients · "
-                f"camion {b['camion']} ({b['origine']})")
-
+    # ---- tournées L à attribuer : choisir une tournée puis cliquer « Attribuer » dans la grille
+    bac = {t["id"]: t for t in p["a_attribuer"]}
     with st.container(border=True):
         st.markdown(f"**Tournées à attribuer ({len(bac)})**")
         if not bac:
-            st.caption("Aucune tournée à attribuer. Préparez des tournées dans « Répartition » (import puis "
-                       "« Classer et proposer ») : elles apparaîtront ici.")
+            st.caption("Aucune tournée à attribuer : importez un fichier de clients dans la rubrique « Tournées ».")
             choix = None
         else:
-            cle = st.radio("Tournée à attribuer", [""] + list(bac), format_func=libelle_bac, key="planning_choix",
-                           label_visibility="collapsed")
+            cle = st.selectbox("Tournée à attribuer", [None] + list(bac), key="planning_choix",
+                               placeholder="Choisir une tournée L",
+                               format_func=lambda i: "— aucune (consulter le planning) —" if i is None else titre_l(bac[i]))
             choix = bac.get(cle)
             if choix:
-                j = date.fromisoformat(choix["date"])
-                st.info(f"Cliquez sur **« Attribuer »** dans la colonne du **{JOURS_SEMAINE[j.weekday()]} {j:%d/%m}**, "
-                        f"sur la ligne du livreur voulu (camion {choix['camion']}, libre ce jour-là).")
-                if not (debut <= j <= debut + timedelta(days=6)):
-                    st.warning("Cette tournée n'est pas dans la semaine affichée : changez de semaine.")
+                st.info(f"Cliquez sur **« Attribuer »** le jour voulu, sur la ligne d'un livreur libre (camion "
+                        f"{choix['type_camion']}). Période {LIBELLES_PERIODE[choix['periode']].lower()}, départ "
+                        "au début de la période : pour les modifier, passez par la rubrique « Tournées ».")
 
     # ---- grille livreurs x jours
     jours = [date.fromisoformat(j) for j in p["jours"]]
@@ -493,19 +327,22 @@ def onglet_planning() -> None:
                               help=f"{STATUTS_TOURNEE.get(case['statut'], case['statut'])} · {case['zone'] or ''} · "
                                    f"{case['nb_terminees']} pointé(s) · cliquer pour voir ou modifier"):
                     st.session_state.planning_detail = {**case, "livreur": l["identifiant"], "livreur_nom": l["nom"]}
+                    st.session_state.pop("planning_trajets", None)
                     st.rerun()
             elif case:
-                col.button(f":violet[Trajets · {case['nb_etapes']}]", key=cle, width="stretch", disabled=True,
-                           icon=":material/route:",
-                           help="Journée de trajets saisie par le livreur (sans tournée).")
-            elif choix and choix["date"] == j.isoformat() and j >= aujourdhui:
-                if l["type_camion"] == choix["camion"]:
+                if col.button(f":violet[Trajets · {case['nb_etapes']}]", key=cle, width="stretch",
+                              icon=":material/route:", help="Journée de trajets saisie par le livreur : voir les étapes."):
+                    st.session_state.planning_trajets = (j.isoformat(), l["nom"])
+                    st.session_state.pop("planning_detail", None)
+                    st.rerun()
+            elif choix and j >= aujourdhui:
+                if l["type_camion"] == choix["type_camion"]:
                     if col.button("Attribuer", key=cle, type="primary", width="stretch", icon=":material/add:",
-                                  help=f"Donner cette tournée à {l['nom']}"):
-                        attribuer_depuis_planning(choix, l, j)
+                                  help=f"{choix['code']} le {j:%d/%m} à {l['nom']}"):
+                        attribuer_l(choix, l["id"], l["nom"], j, choix["periode"], None)
                 else:
                     col.button(":gray[camion ≠]", key=cle, width="stretch", disabled=True,
-                               help=f"Cette tournée exige un camion {choix['camion']}.")
+                               help=f"{choix['code']} exige un camion {choix['type_camion']}.")
             else:
                 col.markdown(":gray[—]" if j < aujourdhui else ":gray[libre]")
     st.caption("Tournée prévue (horloge), en cours (camion), terminée (coche) ; journée de trajets (itinéraire). "
@@ -527,29 +364,225 @@ def onglet_planning() -> None:
             st.rerun()
         suivi_tournee({"id": detail["tournee_id"], "statut": detail["statut"], "date_tournee": detail["date"],
                        "livreur": detail["livreur"], "livreur_nom": detail["livreur_nom"]})
+    trajets = st.session_state.get("planning_trajets")
+    if trajets:
+        st.divider()
+        c1, c2 = st.columns([5, 1])
+        if c2.button("Fermer", key="fermer_trajets", width="stretch"):
+            st.session_state.pop("planning_trajets", None)
+            st.rerun()
+        with c1:
+            journees_de_trajets(date.fromisoformat(trajets[0]), trajets[1])
 
 
-def attribuer_depuis_planning(choix: dict, livreur: dict, jour: date) -> None:
-    if choix["nature"] == "attente":
-        ok, res = api_brut("POST", f"/admin/tournees/{choix['id']}/attribuer", json={"livreur_id": livreur["id"]})
-    else:
-        ok, res = api_brut("POST", "/admin/tournees", json={
-            "livreur_id": livreur["id"], "clients": choix["ids"], "date_tournee": choix["date"],
-            "periode": choix["periode"], "remplacer": False})
-    if not ok:
-        st.error(f"Tournée non attribuée : {res}")
+# --------------------------------------------------------------------------- tournées L (import -> attribution)
+def titre_l(t: dict) -> str:
+    cps = t["codes_postaux"]
+    depart = (t["depart_au_plus_tard"] or "")[:5]
+    return (f"{t['code']} · {LIBELLES_PERIODE[t['periode']]} · {t['zone'] or 'zone non définie'} · "
+            f"{t['nb_clients']} clients · CP {', '.join(cps[:6])}{'…' if len(cps) > 6 else ''} · camion {t['type_camion']}"
+            + (f" · départ avant {depart}" if depart else ""))
+
+
+def onglet_tournees() -> None:
+    importer_clients()
+    tournees = api("GET", "/admin/tournees-l")
+    if tournees is None:
         return
-    if choix["nature"] == "proposee":
-        st.session_state.setdefault("attribuees", {})[choix["numero"]] = livreur["nom"]
-        places = set(choix["ids"])
-        st.session_state.liste_repartition = [i for i in st.session_state.get("liste_repartition", [])
-                                              if i not in places]
+    st.subheader(f"Tournées à attribuer ({len(tournees)})")
+    if not tournees:
+        st.info("Aucune tournée à attribuer : importez un fichier de clients ci-dessus.")
+        return
+    c1, c2, c3 = st.columns(3)
+    f_periode = c1.multiselect("Période", list(LIBELLES_PERIODE), format_func=LIBELLES_PERIODE.get,
+                               placeholder="Toutes", key="filtre_periode")
+    f_camion = c2.multiselect("Camion", ["normal", "hayon"], placeholder="Tous", key="filtre_camion")
+    f_cp = c3.text_input("Code postal", placeholder="ex. 69100", key="filtre_cp").strip()
+    visibles = [t for t in tournees if (not f_periode or t["periode"] in f_periode)
+                and (not f_camion or t["type_camion"] in f_camion)
+                and (not f_cp or any(cp.startswith(f_cp) for cp in t["codes_postaux"]))]
+    st.caption("Ouvrez une tournée pour la visualiser. Choisissez la date et le livreur (et si besoin la période, "
+               "l'heure de départ ou les clients), puis « Attribuer ». Vous pouvez aussi attribuer depuis le Planning.")
+    toutes = {t["id"]: t for t in tournees}
+    livreurs = livreurs_actifs()
+    occupations: dict[date, dict] = {}
+    for t in visibles:
+        with st.expander(titre_l(t)):
+            detail_l(t, toutes, livreurs, occupations)
+
+
+def detail_l(t: dict, toutes: dict[int, dict], livreurs: list[dict], occupations: dict[date, dict]) -> None:
+    i = t["id"]
+    c1, c2, c3 = st.columns(3)
+    jour = c1.date_input("Date de la tournée", value=date.today() + timedelta(days=1), min_value=date.today(),
+                         format="DD/MM/YYYY", key=f"l_date_{i}")
+    choix_periodes = list(LIBELLES_PERIODE)
+    periode = c2.selectbox("Période", choix_periodes, index=choix_periodes.index(t["periode"]),
+                           format_func=LIBELLES_PERIODE.get, key=f"l_per_{i}")
+    v = t if periode == t["periode"] else (api("GET", f"/admin/tournees-l/{i}", params={"periode": periode}) or t)
+    debut = datetime.strptime(v["debut_periode"][:5], "%H:%M").time()
+    conseil = (v["depart_au_plus_tard"] or "")[:5]
+    depart = c3.time_input("Départ du dépôt", value=debut, step=900, key=f"l_dep_{i}_{periode}",
+                           help="Heure à laquelle le livreur quitte le dépôt. Par défaut : début de la période."
+                                + (f" Au plus tard {conseil} pour respecter tous les créneaux." if conseil else ""))
+
+    charge = " · ".join(f"{h} h : {n}" for h, n in v["charge_par_heure"].items())
+    st.caption(f"**{v['nb_clients']} / {v['limite']} clients** · clients prévus par heure : {charge}"
+               + (f" · départ du dépôt conseillé au plus tard à **{conseil}**" if conseil else "")
+               + ". Ordre horaire ; le livreur optimisera l'ordre géographique.")
+    if v["nb_clients"] > v["limite"]:
+        st.error(f"{v['nb_clients']} clients pour une limite de {v['limite']} sur cette période : retirez-en ou "
+                 "déplacez-en vers une autre tournée, ou choisissez la journée complète.")
+    if v["refuses"]:
+        st.warning(f"{len(v['refuses'])} client(s) au-delà de 2 par heure sur leur créneau : risque de retard.")
+    if conseil and depart.strftime("%H:%M") > conseil:
+        st.warning(f"Départ à {depart:%H:%M}, après l'heure conseillée ({conseil}) : des créneaux risquent d'être manqués.")
+
+    # Clients : garder, retirer, ou déplacer vers une autre tournée L (même camion)
+    cibles = {f"Déplacer vers {o['code']}": o["id"] for o in toutes.values()
+              if o["id"] != i and o["type_camion"] == t["type_camion"]}
+    df = pd.DataFrame([{
+        "Action": "Garder",
+        "Passage visé": f"{c['heure_visee']} h – {c['heure_visee'] + 1} h" if c["heure_visee"] is not None else "à revoir",
+        "Créneau": f"{(c['creneau_debut'] or '')[:5]}–{(c['creneau_fin'] or '')[:5]}",
+        "Client": c["nom"], "Code postal": c["code_postal"], "Ville": c["ville"].title(),
+        "Identifiant": c["id_client"]} for c in v["clients"]])
+    edite = st.data_editor(
+        df, hide_index=True, width="stretch", key=f"l_tab_{i}_{periode}_{st.session_state.get(f'l_v_{i}', 0)}",
+        disabled=["Passage visé", "Créneau", "Client", "Code postal", "Ville", "Identifiant"],
+        column_config={"Action": st.column_config.SelectboxColumn(
+            "Action", options=["Garder", "Retirer"] + list(cibles), required=True,
+            help="Retirer le client de la tournée, ou le déplacer vers une autre tournée L.")})
+    changements = [(l["Identifiant"], l["Action"]) for _, l in edite.iterrows() if l["Action"] != "Garder"]
+    if changements:
+        st.session_state[f"l_v_{i}"] = st.session_state.get(f"l_v_{i}", 0) + 1     # tableau neuf au rechargement
+        messages = []
+        for id_client, action in changements:
+            ok, res = api_brut("POST", f"/admin/tournees-l/{i}/clients/{id_client}/deplacer",
+                               json={"vers": cibles.get(action)})
+            messages.append(f"{id_client} : {'retiré' if action == 'Retirer' else action.lower()}" if ok
+                            else f"{id_client} : {res}")
+        annoncer("info", f"{t['code']} modifiée — " + " ; ".join(messages))
+
+    # Livreur et attribution
+    occupes = occupations.get(jour)
+    if occupes is None:
+        occupes = occupations[jour] = occupation(jour)
+    candidats = sorted((c for c in livreurs if c["type_camion"] == t["type_camion"]),
+                       key=lambda c: (c["identifiant"] in occupes, c["nom"]))
+    if not candidats:
+        st.warning(f"Aucun livreur actif avec un camion {t['type_camion']}.")
+        return
+    livreur = st.selectbox("Livreur", candidats, index=None, placeholder="Choisir un livreur", key=f"l_liv_{i}",
+                           format_func=lambda c: libelle_livreur(c, occupes, jour))
+    pris = bool(livreur) and livreur["identifiant"] in occupes
+    if pris:
+        st.warning(f"{livreur['prenom']} {livreur['nom']} a déjà une tournée le {jour:%d/%m/%Y} : choisissez un "
+                   "autre livreur ou une autre date.")
+    nom = f"{livreur['prenom']} {livreur['nom']}" if livreur else None
+    c1, c2 = st.columns([3, 1])
+    if c1.button(f"Attribuer {t['code']}" + (f" à {nom} le {jour:%d/%m/%Y}" if nom else ""), type="primary",
+                 width="stretch", key=f"l_attr_{i}", disabled=not livreur or pris or v["nb_clients"] > v["limite"]):
+        attribuer_l(t, livreur["id"], nom, jour, periode, depart if depart != debut else None)
+    confirme = c2.checkbox("Confirmer la suppression", key=f"l_conf_{i}")
+    if c2.button(f"Supprimer {t['code']}", key=f"l_suppr_{i}", disabled=not confirme, width="stretch"):
+        ok, res = api_brut("DELETE", f"/admin/tournees-l/{i}")
+        if ok:
+            annoncer("success", f"Tournée {t['code']} supprimée : ses clients ne sont plus planifiés.")
+        st.error(str(res))
+
+
+def attribuer_l(t: dict, livreur_id: int, nom: str, jour: date, periode: str, heure_depart) -> None:
+    ok, res = api_brut("POST", f"/admin/tournees-l/{t['id']}/attribuer", json={
+        "date_tournee": jour.isoformat(), "livreur_id": livreur_id, "periode": periode,
+        "heure_depart": heure_depart.strftime("%H:%M") if heure_depart else None})
+    if not ok:
+        st.error(f"{t['code']} non attribuée : {res}")
+        return
     st.session_state.pop("planning_choix", None)
-    avertissements = res.get("avertissements", []) if isinstance(res, dict) else []
-    if avertissements:
-        annoncer("warning", f"Tournée du {jour:%d/%m} attribuée à {livreur['nom']}, à vérifier : " + " ".join(avertissements))
-    annoncer("success", f"Tournée du {jour:%d/%m/%Y} ({choix['plage']}, {choix['nb']} clients) attribuée à "
-                        f"{livreur['nom']}. Elle apparaît dans son application.")
+    texte = (f"{t['code']} attribuée à {nom} le {jour:%d/%m/%Y} ({res['nb_clients']} clients, départ "
+             f"{res['heure_depart'][:5]}). Elle apparaît dans son application et dans le Planning.")
+    if res.get("avertissements"):
+        annoncer("warning", texte + " À vérifier : " + " ".join(res["avertissements"]))
+    annoncer("success", texte)
+
+
+def importer_clients() -> None:
+    bilan = st.session_state.get("bilan_import")
+    with st.expander("Importer un fichier de clients (CSV)", expanded=bilan is None):
+        st.caption("Format de l'échantillon **tournees_esis.csv** (séparateur « , » ou « ; ») : `id_client`, "
+                   "`nom_client`, `adresse`, `creneau_horaire_prefere` obligatoires ; `telephone`, `digicode`, "
+                   "`notes_livraison` facultatifs. Un client présent plusieurs fois n'est livré qu'une fois.")
+        fichier = st.file_uploader("Fichier CSV", type=["csv"], key="fichier_csv")
+        c1, c2 = st.columns(2)
+        journee = c1.toggle("Tournées à la journée complète", key="import_journee",
+                            help="Par défaut, les clients sont répartis en matin, après-midi et soirée selon leur "
+                                 "créneau ; 20 clients au plus seulement sur une journée complète.")
+        max_geo = c2.slider("Nouvelles adresses à géocoder tout de suite", 0, 60, 15, key="import_geo",
+                            help="Nominatim : 1 adresse par seconde. Les autres peuvent être géocodées ensuite.")
+        if fichier is not None and st.button("Importer et préparer les tournées", type="primary"):
+            if fichier.size > 2_000_000:
+                st.error("Fichier trop volumineux (2 Mo maximum).")
+                return
+            contenu = lire_fichier(fichier)
+            if contenu is None:
+                return
+            with st.spinner("Import, nettoyage, géocodage des nouvelles adresses et préparation des tournées..."):
+                resultat = api("POST", "/admin/import-csv", timeout=180, json={
+                    "nom_fichier": fichier.name[:100], "contenu": contenu, "max_geocodages": max_geo})
+                generation = None
+                if resultat and resultat["ids_valides"]:
+                    generation = api("POST", "/admin/tournees-l/generer", attendu=(201,), timeout=60, json={
+                        "clients": resultat["ids_valides"], "journee_continue": journee})
+            if resultat:
+                st.session_state.bilan_import = {"import": resultat, "generation": generation, "journee": journee}
+                st.rerun()
+    if bilan:
+        bilan_import(bilan)
+
+
+def bilan_import(b: dict) -> None:
+    imp, gen = b["import"], b["generation"] or {"tournees": [], "exclus": []}
+    with st.container(border=True):
+        codes = [t["code"] for t in gen["tournees"]]
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Lignes lues", imp["lignes"])
+        c2.metric("Clients importés", len(set(imp["ids_valides"])))
+        c3.metric("Tournées préparées", len(codes), help=", ".join(codes) or None)
+        c4.metric("Clients écartés", len(gen["exclus"]) + len(imp["rejets"]))
+        if codes:
+            st.success(f"Tournées préparées : {codes[0]} à {codes[-1]}. Elles sont listées ci-dessous.")
+        if imp["rejets"]:
+            with st.expander(f"{len(imp['rejets'])} ligne(s) rejetée(s) à l'import"):
+                st.dataframe(pd.DataFrame(imp["rejets"]), hide_index=True, width="stretch")
+        if gen["exclus"]:
+            with st.expander(f"{len(gen['exclus'])} client(s) non placé(s) dans une tournée"):
+                st.dataframe(pd.DataFrame(gen["exclus"]).rename(columns={"id_client": "Client", "motif": "Motif"}),
+                             hide_index=True, width="stretch")
+        a_geocoder = imp["geocodage"]["restants"]
+        c1, c2 = st.columns([3, 1])
+        if a_geocoder and c1.button(f"Géocoder 20 adresses en attente ({a_geocoder}) et préparer leurs tournées"):
+            with st.spinner("Géocodage (1 adresse par seconde)..."):
+                res = api("POST", "/admin/clients/geocoder", timeout=180, json={"maximum": 20})
+                nouvelle = api("POST", "/admin/tournees-l/generer", attendu=(201,), timeout=60, json={
+                    "clients": imp["ids_valides"], "journee_continue": b["journee"]})
+            if res and nouvelle:
+                imp["geocodage"]["restants"] = res["restants"]
+                gen["tournees"] += nouvelle["tournees"]
+                gen["exclus"] = [e for e in nouvelle["exclus"] if not e["motif"].startswith("déjà dans la tournée")]
+                st.session_state.bilan_import = {"import": imp, "generation": gen, "journee": b["journee"]}
+                st.rerun()
+        if c2.button("Fermer le bilan", width="stretch"):
+            st.session_state.pop("bilan_import", None)
+            st.rerun()
+
+
+def onglet_pilotage() -> None:
+    tableau, securite = st.tabs(["Tableau de bord", "Sécurité"])
+    with tableau:
+        onglet_tableau_de_bord()
+    with securite:
+        onglet_securite()
 
 
 # --------------------------------------------------------------------------- import CSV
@@ -562,61 +595,6 @@ def lire_fichier(fichier) -> str | None:
             continue
     st.error("Encodage du fichier non reconnu (UTF-8 ou Windows attendu).")
     return None
-
-
-def onglet_import() -> None:
-    st.write("Fichier au format de l'échantillon **tournees_esis.csv** (séparateur « , » ou « ; ») : "
-             "`id_client`, `nom_client`, `adresse`, `creneau_horaire_prefere` obligatoires ; "
-             "`telephone`, `digicode`, `notes_livraison` facultatifs.")
-    fichier = st.file_uploader("Fichier CSV", type=["csv"])
-    max_geo = st.slider("Nouvelles adresses à géocoder tout de suite", 0, 60, 15,
-                        help="Nominatim : 1 adresse par seconde. Le reste peut être géocodé ensuite par lots.")
-    if fichier is not None and st.button("Importer", type="primary"):
-        if fichier.size > 2_000_000:
-            st.error("Fichier trop volumineux (2 Mo maximum).")
-            return
-        contenu = lire_fichier(fichier)
-        if contenu is None:
-            return
-        with st.spinner("Import, nettoyage et géocodage des nouvelles adresses..."):
-            bilan = api("POST", "/admin/import-csv", timeout=180, json={
-                "nom_fichier": fichier.name[:100], "contenu": contenu, "max_geocodages": max_geo})
-        if bilan:
-            st.session_state.bilan_import = bilan
-            st.session_state.ids_import = bilan["ids_valides"]
-            st.session_state.liste_repartition = list(bilan["ids_valides"])     # prêts pour la répartition
-            st.session_state.pop("proposition", None)
-    bilan = st.session_state.get("bilan_import")
-    if bilan:
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Lignes lues", bilan["lignes"])
-        c2.metric("Clients créés", bilan["crees"])
-        c3.metric("Mis à jour", bilan["mis_a_jour"])
-        c4.metric("Rejetées", len(bilan["rejets"]))
-        geo = bilan["geocodage"]
-        st.caption(f"Géocodage : {geo['traites']} adresse(s) traitée(s) "
-                   f"({', '.join(f'{k} {v}' for k, v in geo['precisions'].items()) or 'aucune'}) ; "
-                   f"{geo['restants']} en attente. {bilan['avec_avertissement']} complément(s) d'adresse "
-                   "déplacé(s) dans les notes chiffrées.")
-        if geo["service_indisponible"]:
-            st.warning("Service de géocodage indisponible : réessayez plus tard.")
-        if bilan["rejets"]:
-            st.dataframe(pd.DataFrame(bilan["rejets"]).rename(columns={
-                "ligne": "Ligne", "id_client": "Identifiant", "motif": "Motif du rejet"}),
-                hide_index=True, width="stretch")
-        if bilan["ids_valides"]:
-            st.info(f"{len(bilan['ids_valides'])} client(s) prêts : ouvrez la rubrique « Répartition » pour les "
-                    "classer par secteur et plage horaire et les attribuer en tournées.")
-    if st.button("Géocoder les adresses en attente (lot de 20)"):
-        with st.spinner("Géocodage (1 adresse par seconde)..."):
-            res = api("POST", "/admin/clients/geocoder", timeout=180, json={"maximum": 20})
-        if res:
-            st.success(f"{res['traites']} adresse(s) traitée(s), {res['restants']} encore en attente.")
-
-
-# --------------------------------------------------------------------------- répartition en tournées
-LIBELLES_PERIODE = {"matin": "Matin", "apres-midi": "Après-midi", "soiree": "Soirée", "journee": "Journée complète"}
-RETIRER = "Retirer"
 
 
 def api_brut(methode: str, chemin: str, **kwargs) -> tuple[bool, dict | str]:
@@ -635,298 +613,6 @@ def api_brut(methode: str, chemin: str, **kwargs) -> tuple[bool, dict | str]:
         return True, corps
     detail = corps.get("detail") if isinstance(corps, dict) else None
     return False, detail if isinstance(detail, str) else f"Erreur {r.status_code}."
-
-
-HEURES = list(range(7, 22))            # colonnes 7 h … 21 h (la dernière couvre 21 h – 22 h)
-BLEU = (31, 78, 121)                   # couleur de la marque Road Optim
-
-
-def _en_heures(valeur: str | None, defaut: float) -> float:
-    if not valeur:
-        return defaut
-    h, m = valeur.split(":")[:2]
-    return int(h) + int(m) / 60
-
-
-def grille_cp_heures(clients: list[dict]) -> pd.DataFrame:
-    """Une ligne par code postal, une colonne par heure : nombre de clients dont le créneau couvre
-    cette heure (un client 8 h – 12 h compte dans 8 h, 9 h, 10 h et 11 h). Sans créneau : 7 h – 22 h."""
-    lignes: dict[str, dict] = {}
-    for c in clients:
-        debut, fin = _en_heures(c["creneau_debut"], 7), _en_heures(c["creneau_fin"], 22)
-        ligne = lignes.setdefault(f"{c['code_postal']} {c['ville'].title()}", {"Clients": 0, **{h: 0 for h in HEURES}})
-        ligne["Clients"] += 1
-        for h in HEURES:
-            if debut < h + 1 and fin > h:
-                ligne[h] += 1
-    grille = pd.DataFrame.from_dict(lignes, orient="index").sort_index()
-    grille.loc["Total"] = grille.sum()
-    grille.columns = ["Clients"] + [f"{h} h" for h in HEURES]
-    grille.index.name = "Code postal"
-    return grille
-
-
-def style_grille(grille: pd.DataFrame):
-    """Cases colorées selon le nombre de clients (plus foncé = plus chargé) ; zéros masqués."""
-    heures = [f"{h} h" for h in HEURES]
-    maximum = max(1, int(grille.drop(index="Total")[heures].to_numpy().max()) if len(grille) > 1 else 1)
-
-    def couleur(v):
-        if not v:
-            return "color: transparent"
-        a = 0.15 + 0.85 * min(v, maximum) / maximum
-        texte = "#FFFFFF" if a > 0.55 else "#16213A"
-        return f"background-color: rgba({BLEU[0]}, {BLEU[1]}, {BLEU[2]}, {a:.2f}); color: {texte}"
-
-    corps = pd.IndexSlice[grille.index.drop("Total"), heures]
-    return (grille.style.map(couleur, subset=corps)
-            .map(lambda v: "font-weight: 600", subset=pd.IndexSlice[:, ["Clients"]])
-            .map(lambda v: "background-color: #EEF1EA; font-weight: 600", subset=pd.IndexSlice[["Total"], :])
-            .format(lambda v: "" if not v else str(int(v))))
-
-
-def apercu_commandes(liste: list[str]) -> None:
-    """Vue d'ensemble de la liste à livrer : où (code postal) et quand (heures des créneaux)."""
-    cle = hash(tuple(liste))
-    cache = st.session_state.get("apercu")
-    if not cache or cache[0] != cle:
-        donnees = api("POST", "/admin/repartition/apercu", json={"clients": liste[:500]})
-        if donnees is None:
-            return
-        st.session_state.apercu = cache = (cle, donnees)
-    clients = cache[1]
-    if not clients:
-        return
-    plages = {"Matin": 0, "Après-midi": 0, "Soirée": 0}
-    for c in clients:
-        milieu = (_en_heures(c["creneau_debut"], 7) + _en_heures(c["creneau_fin"], 22)) / 2
-        plages["Matin" if milieu < 13 else "Après-midi" if milieu < 18 else "Soirée"] += 1
-    nb_cp = len({c["code_postal"] for c in clients})
-    palettes = sum(c["type_camion_requis"] == "hayon" for c in clients)
-    non_localises = sum(not c["localise"] for c in clients)
-    st.markdown(f"**Aperçu des commandes** — {len(clients)} clients, {nb_cp} code(s) postal(aux) · "
-                + " · ".join(f"{k} {v}" for k, v in plages.items())
-                + (f" · {palettes} palette(s)" if palettes else "")
-                + (f" · {non_localises} non localisé(s)" if non_localises else ""))
-    grille = grille_cp_heures(clients)
-    st.dataframe(style_grille(grille), width="stretch", height=min(38 * (len(grille) + 1) + 3, 560))
-    st.caption("Chaque case indique combien de clients de ce code postal peuvent être livrés pendant cette heure "
-               "(selon leur créneau). Plus la case est foncée, plus le secteur est chargé à ce moment-là.")
-    choix = st.multiselect("Détail par code postal", sorted({c["code_postal"] for c in clients}),
-                           placeholder="Choisir un ou plusieurs codes postaux")
-    if choix:
-        detail = sorted((c for c in clients if c["code_postal"] in choix),
-                        key=lambda c: (c["code_postal"], c["creneau_debut"] or "", c["creneau_fin"] or ""))
-        st.dataframe(pd.DataFrame([{
-            "Code postal": c["code_postal"], "Ville": c["ville"].title(), "Client": c["nom"],
-            "Créneau": f"{(c['creneau_debut'] or '07:00')[:5]} – {(c['creneau_fin'] or '22:00')[:5]}",
-            "Camion": "hayon (palette)" if c["type_camion_requis"] == "hayon" else "normal",
-            "Identifiant": c["id_client"]} for c in detail]), hide_index=True, width="stretch")
-
-
-def changer_liste(ids: list[str]) -> None:
-    st.session_state.liste_repartition = list(dict.fromkeys(ids))
-    for cle in ("proposition", "affectation", "attribuees"):
-        st.session_state.pop(cle, None)
-
-
-def onglet_repartition() -> None:
-    st.caption("Importez une liste de clients (rubrique Import CSV), complétez-la si besoin, puis laissez "
-               "l'application les classer par secteur (zone et code postal), plage horaire et type de camion. "
-               "Elle propose une tournée par groupe, dans la limite de chaque zone, avec un livreur disponible : "
-               "vous ajustez, puis vous validez.")
-    if bilan := st.session_state.pop("bilan_repartition", None):
-        for ok, texte in bilan:
-            (st.warning if ok == "alerte" else st.success if ok else st.error)(texte)
-    st.session_state.setdefault("liste_repartition", list(st.session_state.get("ids_import", [])))
-    liste = st.session_state.liste_repartition
-
-    # ---- 1. la liste
-    st.subheader(f"1. Clients à répartir ({len(liste)})")
-    c1, c2 = st.columns(2)
-    ids_import = st.session_state.get("ids_import", [])
-    if c1.button(f"Reprendre le dernier import ({len(ids_import)})", disabled=not ids_import, width="stretch"):
-        changer_liste(ids_import)
-        st.rerun()
-    if c2.button("Vider la liste", disabled=not liste, width="stretch"):
-        changer_liste([])
-        st.rerun()
-    if liste:
-        st.caption("Identifiants : " + ", ".join(liste[:12]) + (f" … (+{len(liste) - 12})" if len(liste) > 12 else ""))
-    with st.expander("Ajouter des clients déjà enregistrés"):
-        col_a, col_b = st.columns(2)
-        with col_a, st.form("rep_ajout_ids", clear_on_submit=True):
-            texte = st.text_area("Identifiants (un par ligne)", height=110)
-            if st.form_submit_button("Ajouter ces identifiants"):
-                nouveaux = [x.strip() for x in texte.replace(",", "\n").splitlines() if x.strip()]
-                changer_liste(liste + nouveaux)
-                st.rerun()
-        with col_b:
-            with st.form("rep_recherche"):
-                recherche = st.text_input("Code postal, ville ou nom", placeholder="69100")
-                chercher = st.form_submit_button("Rechercher")
-            if chercher and recherche.strip():
-                st.session_state.rep_resultats = api("GET", "/admin/clients",
-                                                     params={"recherche": recherche.strip(), "limite": 100}) or []
-            resultats = [c for c in st.session_state.get("rep_resultats", []) if c["id_client"] not in liste]
-            if resultats:
-                choix = st.multiselect(f"{len(resultats)} client(s) trouvé(s), hors liste", resultats, default=resultats,
-                                       format_func=lambda c: f"{c['code_postal']} {c['ville']} — {c['nom']} ({c['id_client']})")
-                if st.button("Ajouter la sélection", disabled=not choix):
-                    changer_liste(liste + [c["id_client"] for c in choix])
-                    st.session_state.pop("rep_resultats", None)
-                    st.rerun()
-
-    if liste:
-        apercu_commandes(liste)
-
-    # ---- 2. classer et proposer
-    st.subheader("2. Classer et proposer des tournées")
-    c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
-    jour = c1.date_input("Date des tournées", value=date.today(), min_value=date.today(), format="DD/MM/YYYY",
-                         key="rep_date")
-    continue_ = c2.toggle("Journée complète (une seule plage)", key="rep_continue",
-                          help="Par défaut, les clients sont séparés en matin, après-midi et soirée "
-                               "selon leur créneau, pour éviter de longues attentes. Une tournée peut "
-                               "atteindre la limite de sa zone (20 au plus) seulement sur la journée complète.")
-    par_heure = c3.number_input("Clients maximum par heure", min_value=1, max_value=6, value=2, key="rep_par_heure",
-                                help="Une tournée ne prévoit jamais plus de clients dans une même heure "
-                                     "(8 h – 9 h, 9 h – 10 h…) : elle reste réalisable par le livreur.")
-    if c4.button("Classer et proposer", type="primary", disabled=not liste, width="stretch"):
-        prop = api("POST", "/admin/repartition", timeout=30, json={
-            "date_tournee": jour.isoformat(), "clients": liste[:500], "journee_continue": continue_,
-            "clients_par_heure": int(par_heure)})
-        if prop is not None:
-            st.session_state.proposition = prop
-            for cle in [k for k in st.session_state if str(k).startswith(("rep_g", "rep_l"))]:
-                del st.session_state[cle]
-            st.session_state.pop("affectation", None)
-            st.session_state.pop("attribuees", None)
-            st.rerun()
-    prop = st.session_state.get("proposition")
-    if prop:
-        proposition(prop)
-
-
-def proposition(prop: dict) -> None:
-    jour = date.fromisoformat(prop["date_tournee"])
-    groupes = prop["groupes"]
-    if prop["exclus"]:
-        with st.expander(f"{len(prop['exclus'])} client(s) écarté(s)", expanded=True):
-            st.dataframe(pd.DataFrame(prop["exclus"]).rename(columns={"id_client": "Client", "motif": "Motif"}),
-                         hide_index=True, width="stretch")
-    if not groupes:
-        st.info("Aucun client à répartir.")
-        return
-
-    # Classement : code postal × plage horaire
-    lignes = [{"Code postal": f"{c['code_postal']} {c['ville']}", "Plage": LIBELLES_PERIODE[g["periode"]]}
-              for g in groupes for c in g["clients"]]
-    tableau = pd.crosstab(pd.DataFrame(lignes)["Code postal"], pd.DataFrame(lignes)["Plage"], margins=True,
-                          margins_name="Total")
-    ordre = [p for p in LIBELLES_PERIODE.values() if p in tableau.columns] + ["Total"]
-    with st.expander(f"Classement par code postal et plage horaire ({len(lignes)} clients)"):
-        st.dataframe(tableau[ordre], width="stretch")
-
-    st.subheader(f"3. Tournées proposées pour le {jour:%d/%m/%Y} ({len(groupes)})")
-    st.caption("Ouvrez une tournée pour la visualiser (heure visée, créneau, client, code postal…), choisissez "
-               "le livreur puis « Attribuer ».")
-    par_numero = {g["numero"]: g for g in groupes}
-    fiches = {c["id_client"]: c for g in groupes for c in g["clients"]}
-    aff = st.session_state.setdefault("affectation", {c["id_client"]: g["numero"] for g in groupes for c in g["clients"]})
-    attribuees = st.session_state.setdefault("attribuees", {})
-
-    def membres(n: int) -> list[dict]:
-        return sorted((fiches[i] for i, m in aff.items() if m == n),
-                      key=lambda c: (c["heure_visee"] if c["heure_visee"] is not None else 99, c["creneau_debut"] or ""))
-
-    visibles = [g for g in groupes if membres(g["numero"]) or g["numero"] in attribuees]
-    numeros = [str(g["numero"]) for g in visibles if g["numero"] not in attribuees]
-    occupes, livreurs = occupation(jour), livreurs_actifs()          # une seule lecture pour toute la liste
-    restantes = len(numeros)
-    st.caption(f"{restantes} tournée(s) à attribuer, {len(visibles) - restantes} attribuée(s).")
-    for g in visibles:
-        n, liste_n = g["numero"], membres(g["numero"])
-        depart = (g["depart_au_plus_tard"] or "")[:5]
-        etat = f"[Attribuée à {attribuees[n]}] " if n in attribuees else ""
-        titre = (f"{etat}Tournée {n} — {g['zone'] or 'zone non définie'} · {LIBELLES_PERIODE[g['periode']]} · camion "
-                 f"{g['type_camion']} · {len(liste_n)} / {g['limite']} clients · CP "
-                 f"{', '.join(sorted({c['code_postal'] for c in liste_n}))}"
-                 + (f" · départ du dépôt avant {depart}" if depart else ""))
-        with st.expander(titre, expanded=False):
-            detail_proposee(par_numero[n], jour, liste_n, numeros, aff, attribuees, occupes, livreurs)
-
-
-def detail_proposee(g: dict, jour: date, liste_n: list[dict], numeros: list[str], aff: dict, attribuees: dict,
-                    occupes: dict, livreurs: list[dict]) -> None:
-    n = g["numero"]
-    depart = (g["depart_au_plus_tard"] or "")[:5]
-    charge: dict[int, int] = {}
-    for c in liste_n:
-        if c["heure_visee"] is not None:
-            charge[c["heure_visee"]] = charge.get(c["heure_visee"], 0) + 1
-    st.caption("Clients prévus par heure — " + " · ".join(f"{h} h : {nb}" for h, nb in sorted(charge.items()))
-               + (f" · départ du dépôt avant {depart}" if depart else "")
-               + ". L'ordre géographique sera optimisé par le livreur.")
-    df = pd.DataFrame([{
-        "Tournée": str(n),
-        "Passage visé": f"{c['heure_visee']} h – {c['heure_visee'] + 1} h" if c["heure_visee"] is not None else "",
-        "Créneau": f"{(c['creneau_debut'] or '')[:5]}–{(c['creneau_fin'] or '')[:5]}",
-        "Client": c["nom"], "Code postal": c["code_postal"], "Ville": c["ville"], "id": c["id_client"]}
-        for c in liste_n])
-    if n in attribuees:
-        st.success(f"Tournée attribuée à {attribuees[n]}. Retrouvez-la dans « Tournées du jour ».")
-        st.dataframe(df.drop(columns=["Tournée"]), hide_index=True, width="stretch")
-        return
-    cle = f"rep_g{n}_{abs(hash(tuple(c['id_client'] for c in liste_n)))}"
-    edite = st.data_editor(
-        df, key=cle, hide_index=True, width="stretch",
-        disabled=["Passage visé", "Client", "Code postal", "Ville", "Créneau", "id"],
-        column_config={"Tournée": st.column_config.SelectboxColumn(
-            "Tournée", options=numeros + [RETIRER], required=True,
-            help="Déplacer le client vers une autre tournée proposée, ou le retirer."),
-            "id": st.column_config.TextColumn("Identifiant")})
-    deplaces = {l["id"]: l["Tournée"] for _, l in edite.iterrows() if l["Tournée"] != str(n)}
-    if deplaces:
-        for i, cible in deplaces.items():
-            aff[i] = RETIRER if cible == RETIRER else int(cible)
-        st.rerun()
-    if len(liste_n) > g["limite"]:
-        st.warning(f"{len(liste_n)} clients pour une limite de {g['limite']} : déplacez-en vers une autre tournée.")
-    if any(nb > 2 for nb in charge.values()):
-        st.warning("Plus de 2 clients prévus sur une même heure : risque de retard.")
-
-    candidats = sorted((c for c in livreurs if c["type_camion"] == g["type_camion"]),
-                       key=lambda c: c["identifiant"] in occupes)
-    if not candidats:
-        st.warning(f"Aucun livreur avec un camion {g['type_camion']}.")
-        return
-    defaut = next((k for k, c in enumerate(candidats)
-                   if c["id"] == g["livreur_propose_id"] and c["identifiant"] not in occupes), 0)
-    col1, col2 = st.columns([3, 1])
-    livreur = col1.selectbox("Livreur", candidats, index=defaut, key=f"rep_l{n}",
-                             format_func=lambda c: libelle_livreur(c, occupes, jour))
-    pris = livreur["identifiant"] in occupes
-    if pris:
-        st.warning(f"{livreur['prenom']} {livreur['nom']} a déjà une tournée le {jour:%d/%m/%Y} : choisissez un "
-                   "autre livreur.")
-    col2.markdown("&nbsp;")
-    if col2.button("Attribuer", key=f"rep_attribuer_{n}", type="primary", width="stretch",
-                   disabled=pris or not liste_n or len(liste_n) > g["limite"]):
-        ok, res = api_brut("POST", "/admin/tournees", json={
-            "livreur_id": livreur["id"], "clients": [c["id_client"] for c in liste_n],
-            "date_tournee": jour.isoformat(), "periode": g["periode"], "remplacer": False})
-        nom = f"{livreur['prenom']} {livreur['nom']}"
-        if ok:
-            attribuees[n] = nom
-            places = {c["id_client"] for c in liste_n}
-            st.session_state.liste_repartition = [i for i in st.session_state.liste_repartition if i not in places]
-            st.session_state.bilan_repartition = (
-                [(True, f"Tournée {n} attribuée à {nom} : {len(liste_n)} clients, le {jour:%d/%m/%Y}.")]
-                + [("alerte", f"Tournée {n} : {m}") for m in res.get("avertissements", [])])
-            st.session_state.jour_a_afficher = jour
-            st.rerun()
-        st.error(f"Tournée {n} non attribuée : {res}")
 
 
 # --------------------------------------------------------------------------- livreurs
@@ -1200,12 +886,9 @@ def ecran_admin(profil: dict, outils_communs) -> None:
     onglet = st.segmented_control("Rubrique", ONGLETS, default=ONGLETS[0], key="onglet_admin",
                                   label_visibility="collapsed") or ONGLETS[0]
     {
-        "Tableau de bord": onglet_tableau_de_bord,
+        "Tournées": onglet_tournees,
         "Planning": onglet_planning,
-        "Tournées du jour": onglet_tournees,
-        "Import CSV": onglet_import,
-        "Répartition": onglet_repartition,
         "Livreurs": onglet_livreurs,
         "Clients": onglet_clients,
-        "Sécurité": onglet_securite,
+        "Tableau de bord et sécurité": onglet_pilotage,
     }[onglet]()

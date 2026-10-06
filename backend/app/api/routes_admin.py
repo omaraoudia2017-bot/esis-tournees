@@ -5,6 +5,7 @@ Le contrôle de rôle est appliqué à TOUT le routeur (un livreur reçoit 403 e
 journalisée). La logique est dans app/services/admin.py et app/services/import_csv.py.
 """
 from datetime import date, datetime, time, timedelta, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
 from sqlalchemy import select
@@ -17,13 +18,12 @@ from app.db.session import get_db
 from app.models import Client, JournalSecurite, Tournee, Utilisateur, Vehicule, Zone
 from app.models.enums import RoleUtilisateur, TypeCamion
 from app.optim.faisabilite import charge_par_heure
-from app.schemas.admin import (ApercuClient, ApercuTourneeVue, BilanGeocodageVue, DemandeApercuTournee, ClientExclu, ClientRepartition, ClientResume, CompteVue,
-                               DemandeAjoutExistant, DemandeAnonymisation, DemandeApercu, DemandeCompte, DemandeCorrection,
-                               DemandeGeocodage, DemandeImport, DemandeReattribution, DemandeRepartition,
-                               DemandeTournee,
-                               DemandeTypeLivreur, DemandeVehicule, GroupeRepartition, LivreurDisponible,
-                               PropositionRepartition, CasePlanning, LivreurPlanning, PlanningVue,
-                               ReponseCompte, ReponseImport, RejetVue, TableauDeBordVue,
+from app.schemas.admin import (BilanGeocodageVue, CasePlanning, ClientExclu, ClientRepartition, ClientResume,
+                               CompteVue, DemandeAjoutExistant, DemandeAnonymisation, DemandeAttributionL,
+                               DemandeCompte, DemandeCorrection, DemandeDeplacementL, DemandeGenerationL,
+                               DemandeGeocodage, DemandeImport, DemandeReattribution, DemandeTournee,
+                               DemandeTypeLivreur, DemandeVehicule, LivreurPlanning, PlanningVue, RejetVue,
+                               ReponseCompte, ReponseGenerationL, ReponseImport, TableauDeBordVue, TourneeLVue,
                                TourneeResume, VehiculeVue)
 from app.schemas.auth import EvenementJournal
 from app.schemas.tournee import RemarqueVue, TourneeVue
@@ -32,7 +32,7 @@ from app.services import admin as service
 from app.services import import_csv
 from app.services import remarques as remarques_service
 from app.services import planning as planning_service
-from app.services import repartition as repartition_service
+from app.services import tournees_l as tournees_l_service
 from app.services import trajets as trajets_service
 from app.services.geocodage import Geocodeur
 from app.services.journal import contexte_depuis, tracer_consultation
@@ -216,10 +216,8 @@ def planning(debut: date | None = None, jours: int = Query(7, ge=1, le=14), db: 
     cases += [CasePlanning(livreur_id=j.livreur_id, date=j.date_journee, nature="trajets", nb_etapes=n,
                            heure_depart=j.heure_depart, optimisee=j.optimisee_le is not None)
               for j, n in p.trajets if (j.livreur_id, j.date_journee) not in occupees]
-    attente = _resumes(service.lister_tournees(db, None, en_attente_depuis=aujourdhui))
-    types = planning_service.types_camion_requis(db, [t.id for t in attente])
-    for t in attente:
-        t.type_camion_requis = types.get(t.id)
+    tournees_l_service.convertir_en_attente(db, get_settings())
+    attente = [_vue_l(db, l) for l in tournees_l_service.a_attribuer(db)]
     return PlanningVue(
         debut=p.debut, fin=p.fin, jours=[p.debut + timedelta(days=k) for k in range(jours)],
         livreurs=[LivreurPlanning(id=u.id, identifiant=u.identifiant, nom=f"{u.prenom} {u.nom}",
@@ -230,38 +228,101 @@ def planning(debut: date | None = None, jours: int = Query(7, ge=1, le=14), db: 
         cases=cases, a_attribuer=attente)
 
 
-@router.post("/tournees/apercu", response_model=ApercuTourneeVue)
-def apercu_tournee(demande: DemandeApercuTournee, db: Session = Depends(get_db)):
-    """Aperçu d'une tournée avant attribution (ordre horaire, codes postaux, charge par heure,
-    départ du dépôt au plus tard). N'enregistre rien."""
+@router.post("/tournees/{tournee_id}/desattribuer", response_model=TourneeLVue)
+def desattribuer_tournee(tournee_id: int, a: service.Acteur = Depends(acteur), db: Session = Depends(get_db)):
+    """Annule l'attribution (tournée pas encore commencée) : ses clients reviennent dans une
+    tournée « L » à attribuer (nouvelle date, nouveau livreur)."""
+    try:
+        l = service.desattribuer_tournee(db, a, get_settings(), tournee_id)
+    except service.ErreurAdmin as e:
+        raise _http(e) from None
+    return _vue_l(db, l)
+
+
+# --------------------------------------------------------------------------- tournées « L » (import -> attribution)
+def _heure_s(secondes: int) -> time:
+    secondes = min(max(0, secondes), 24 * 3600 - 60)
+    return time(secondes // 3600, secondes % 3600 // 60)
+
+
+def _vue_l(db: Session, l, periode: str | None = None) -> TourneeLVue:
     reglages = get_settings()
-    a = service.apercu_tournee(db, reglages, demande.clients, demande.periode)
-    return ApercuTourneeVue(
-        zone=a.zone.nom if a.zone else None, limite=a.limite, debut_periode=_heure_s(a.periode.depart_s),
-        fin_periode=_heure_s(a.periode.fin_s),
+    v = tournees_l_service.vue(db, reglages, l, periode)
+    p = service._periode(periode or l.periode, reglages)
+    return TourneeLVue(
+        id=l.id, code=l.code, periode=periode or l.periode, periode_proposee=l.periode, zone=v.zone.nom if v.zone else None,
+        type_camion=l.type_camion, limite=v.limite, nb_clients=len(v.clients),
+        codes_postaux=sorted({c.code_postal for c in v.clients}), cree_le=l.cree_le,
+        debut_periode=_heure_s(p.depart_s), fin_periode=_heure_s(p.fin_s),
         clients=[ClientRepartition(id_client=c.id_client, nom=c.nom_client, code_postal=c.code_postal, ville=c.ville,
                                    creneau_debut=c.creneau_debut, creneau_fin=c.creneau_fin,
                                    type_camion_requis=c.type_camion_requis.value,
-                                   heure_visee=a.heures.get(c.id_client)) for c in a.clients],
-        charge_par_heure={str(h): n for h, n in charge_par_heure(list(a.heures.values())).items()},
-        refuses=a.refuses, inconnus=a.inconnus, non_localises=a.non_localises,
-        depart_au_plus_tard=_heure_s(a.depart_au_plus_tard_s) if a.depart_au_plus_tard_s is not None else None)
+                                   heure_visee=v.f.heures.get(c.id_client)) for c in v.clients],
+        charge_par_heure={str(h): n for h, n in charge_par_heure(list(v.f.heures.values())).items()},
+        refuses=v.f.refuses,
+        depart_au_plus_tard=_heure_s(v.f.depart_au_plus_tard_s) if v.f.depart_au_plus_tard_s is not None else None)
 
 
-@router.get("/tournees/en-attente", response_model=list[TourneeResume])
-def tournees_en_attente(db: Session = Depends(get_db)):
-    """Tournées à venir dont l'attribution a été annulée : à redonner à un livreur."""
-    return _resumes(service.lister_tournees(db, None, en_attente_depuis=service.aujourdhui(get_settings())))
+@router.get("/tournees-l", response_model=list[TourneeLVue])
+def tournees_l_a_attribuer(db: Session = Depends(get_db)):
+    """Tournées L (L1, L2…) préparées à l'import et pas encore attribuées."""
+    tournees_l_service.convertir_en_attente(db, get_settings())
+    return [_vue_l(db, l) for l in tournees_l_service.a_attribuer(db)]
 
 
-@router.post("/tournees/{tournee_id}/desattribuer", response_model=TourneeResume)
-def desattribuer_tournee(tournee_id: int, a: service.Acteur = Depends(acteur), db: Session = Depends(get_db)):
-    """Annule l'attribution (tournée pas encore commencée) : la tournée passe « en attente »."""
+@router.post("/tournees-l/generer", response_model=ReponseGenerationL, status_code=201)
+def generer_tournees_l(demande: DemandeGenerationL, a: service.Acteur = Depends(acteur), db: Session = Depends(get_db)):
+    """Découpe une liste de clients (en général le fichier importé) en tournées L réalisables :
+    par période (créneaux), secteur et type de camion, au plus N clients par heure, ordre horaire.
+    Un client présent plusieurs fois n'est livré qu'une fois."""
+    creees, exclus = tournees_l_service.generer(db, a, get_settings(), demande.clients, demande.journee_continue)
+    return ReponseGenerationL(tournees=[_vue_l(db, l) for l in creees],
+                              exclus=[ClientExclu(id_client=i, motif=m) for i, m in exclus])
+
+
+@router.get("/tournees-l/{l_id}", response_model=TourneeLVue)
+def tournee_l(l_id: int, periode: Literal["matin", "apres-midi", "soiree", "journee"] | None = None,
+              db: Session = Depends(get_db)):
+    """Détail d'une tournée L, éventuellement recalculé pour une autre période (avant attribution)."""
     try:
-        t = service.desattribuer_tournee(db, a, get_settings(), tournee_id)
+        return _vue_l(db, tournees_l_service.tournee_l(db, l_id), periode)
     except service.ErreurAdmin as e:
         raise _http(e) from None
-    return next(r for r in _resumes(service.lister_tournees(db, t.date_tournee)) if r.id == t.id)
+
+
+@router.post("/tournees-l/{l_id}/attribuer", response_model=TourneeResume, status_code=201)
+def attribuer_tournee_l(l_id: int, demande: DemandeAttributionL, a: service.Acteur = Depends(acteur),
+                        db: Session = Depends(get_db)):
+    """Attribue la tournée L : date, livreur, et si besoin une autre période et une heure de départ du
+    dépôt. Mêmes contrôles qu'une création de tournée ; avertissements de faisabilité en retour."""
+    try:
+        t = tournees_l_service.attribuer(db, a, get_settings(), l_id, demande.date_tournee, demande.livreur_id,
+                                         demande.periode, demande.heure_depart)
+    except service.ErreurAdmin as e:
+        raise _http(e) from None
+    resume = next(r for r in _resumes(service.lister_tournees(db, t.date_tournee)) if r.id == t.id)
+    resume.avertissements = service.avertissements_tournee(db, get_settings(), t)
+    return resume
+
+
+@router.post("/tournees-l/{l_id}/clients/{id_client}/deplacer", status_code=204)
+def deplacer_client_l(l_id: int, demande: DemandeDeplacementL, id_client: str = Path(pattern=MOTIF_ID_CLIENT),
+                      a: service.Acteur = Depends(acteur), db: Session = Depends(get_db)):
+    """Retire le client de la tournée L (vers = null) ou le déplace vers une autre tournée L."""
+    try:
+        tournees_l_service.deplacer_client(db, a, l_id, id_client, demande.vers)
+    except service.ErreurAdmin as e:
+        raise _http(e) from None
+    return Response(status_code=204)
+
+
+@router.delete("/tournees-l/{l_id}", status_code=204)
+def supprimer_tournee_l(l_id: int, a: service.Acteur = Depends(acteur), db: Session = Depends(get_db)):
+    try:
+        tournees_l_service.supprimer(db, a, l_id)
+    except service.ErreurAdmin as e:
+        raise _http(e) from None
+    return Response(status_code=204)
 
 
 @router.post("/tournees/{tournee_id}/attribuer", response_model=TourneeResume)
@@ -311,56 +372,6 @@ def ajouter_client_existant(tournee_id: int, demande: DemandeAjoutExistant,
     except service.ErreurAdmin as e:
         raise _http(e) from None
     return {"livraison_id": livraison.id, "message": "Client ajouté : le livreur doit relancer l'optimisation."}
-
-
-# --------------------------------------------------------------------------- répartition en tournées
-def _heure_s(secondes: int) -> time:
-    secondes = min(max(0, secondes), 24 * 3600 - 60)
-    return time(secondes // 3600, secondes % 3600 // 60)
-
-
-@router.post("/repartition/apercu", response_model=list[ApercuClient])
-def apercu_repartition(demande: DemandeApercu, db: Session = Depends(get_db)):
-    """Code postal, ville et créneau des clients d'une liste (grille « code postal × heure »).
-    Ni adresse, ni téléphone, ni digicode : le strict nécessaire (minimisation)."""
-    ids = list(dict.fromkeys(i.strip() for i in demande.clients))
-    clients = db.scalars(select(Client).where(Client.id_client.in_(ids), Client.actif.is_(True))
-                         .order_by(Client.code_postal, Client.creneau_debut)).all()
-    return [ApercuClient(id_client=c.id_client, nom=c.nom_client, code_postal=c.code_postal, ville=c.ville,
-                         creneau_debut=c.creneau_debut, creneau_fin=c.creneau_fin,
-                         type_camion_requis=c.type_camion_requis.value, localise=c.latitude is not None)
-            for c in clients]
-
-
-@router.post("/repartition", response_model=PropositionRepartition)
-def proposer_repartition(demande: DemandeRepartition, db: Session = Depends(get_db)):
-    """Classe une liste de clients (zone, plage horaire, type de camion), la coupe selon la limite
-    d'effectif de chaque zone et propose un livreur disponible par groupe. N'enregistre rien :
-    chaque groupe validé est créé avec POST /admin/tournees (mêmes contrôles)."""
-    reglages = get_settings()
-    jour = demande.date_tournee or service.aujourdhui(reglages)
-    if jour < service.aujourdhui(reglages):
-        raise HTTPException(422, "Impossible de planifier une tournée dans le passé.")
-    prop = repartition_service.proposer(db, reglages, jour, demande.clients, demande.journee_continue,
-                                        demande.clients_par_heure)
-    return PropositionRepartition(
-        date_tournee=jour,
-        groupes=[GroupeRepartition(
-            numero=k, zone=g.zone.nom if g.zone else None, periode=g.periode, type_camion=g.type_camion,
-            limite=g.limite, codes_postaux=g.codes_postaux,
-            clients=[ClientRepartition(id_client=c.id_client, nom=c.nom_client, code_postal=c.code_postal,
-                                       ville=c.ville, creneau_debut=c.creneau_debut, creneau_fin=c.creneau_fin,
-                                       type_camion_requis=c.type_camion_requis.value,
-                                       heure_visee=g.heures.get(c.id_client)) for c in g.clients],
-            livreur_propose_id=g.livreur.id if g.livreur else None,
-            debut_periode=_heure_s(g.debut_periode_s),
-            depart_au_plus_tard=_heure_s(g.depart_au_plus_tard_s) if g.depart_au_plus_tard_s is not None else None,
-            charge_par_heure={str(h): n for h, n in charge_par_heure(list(g.heures.values())).items()})
-            for k, g in enumerate(prop.groupes, start=1)],
-        livreurs_disponibles=[LivreurDisponible(id=u.id, identifiant=u.identifiant, nom=f"{u.prenom} {u.nom}",
-                                                vehicule=v.immatriculation, type_camion=v.type_camion.value)
-                              for u, v in prop.livreurs],
-        exclus=[ClientExclu(id_client=i, motif=m) for i, m in prop.exclus])
 
 
 # --------------------------------------------------------------------------- journées de trajets (lecture seule)

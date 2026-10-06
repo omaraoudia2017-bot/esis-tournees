@@ -17,13 +17,13 @@ from decimal import Decimal
 from statistics import mean
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.core.security import generer_code_activation, hacher_mdp, normaliser_code_activation
-from app.models import (CacheGeocodage, Client, CodeSecours, JournalSecurite, Livraison, Tournee,
-                        Utilisateur, Vehicule, Zone)
+from app.models import (CacheGeocodage, Client, ClientTourneeL, CodeSecours, JournalSecurite, Livraison,
+                        Tournee, TourneeL, Utilisateur, Vehicule, Zone)
 from app.models.enums import (PrecisionGeocodage, RoleUtilisateur, SourceClient, StatutLivraison,
                               StatutTournee, TypeCamion, TypeLivreur)
 from app.optim.faisabilite import limite_periode
@@ -241,7 +241,7 @@ def _controler_clients(db: Session, ids: list[str], vehicule: Vehicule) -> list[
 
 def creer_tournee(db: Session, acteur: Acteur, reglages: Settings, livreur_id: int,
                   ids_clients: list[str], jour: date | None = None, periode: str = "matin",
-                  remplacer: bool = False) -> Tournee:
+                  remplacer: bool = False, heure_depart: time | None = None) -> Tournee:
     """Tournée du jour d'un livreur, dans l'ordre fourni (« liste brute ») : le livreur
     l'optimise ensuite avec son bouton. Refus si véhicule inadapté ou limite d'effectif dépassée."""
     jour = jour or aujourdhui(reglages)
@@ -257,6 +257,10 @@ def creer_tournee(db: Session, acteur: Acteur, reglages: Settings, livreur_id: i
     if vehicule is None:
         raise ErreurAdmin(409, f"{livreur.identifiant} n'a pas de véhicule : affectez-lui un camion.")
     p = _periode(periode, reglages)
+    if heure_depart is not None and not (time(4) <= heure_depart and
+                                         en_secondes(heure_depart) <= p.fin_s - 3600):
+        raise ErreurAdmin(422, f"Heure de départ du dépôt invalide : entre 04:00 et {_heure(p.fin_s - 3600):%H:%M} "
+                          "pour cette période.")
 
     existante = db.scalar(select(Tournee).where(Tournee.livreur_id == livreur.id,
                                                 Tournee.date_tournee == jour))
@@ -290,7 +294,7 @@ def creer_tournee(db: Session, acteur: Acteur, reglages: Settings, livreur_id: i
         db.flush()
     tournee = Tournee(date_tournee=jour, livreur_id=livreur.id, vehicule_id=vehicule.id,
                       zone_id=zone_id, max_clients=limite,
-                      heure_depart=_heure(p.depart_s), heure_fin=_heure(p.fin_s))
+                      heure_depart=heure_depart or _heure(p.depart_s), heure_fin=_heure(p.fin_s))
     db.add(tournee)
     db.flush()
     temps_s, _ = estimer_temps_service_s(clients, reglages)
@@ -301,39 +305,6 @@ def creer_tournee(db: Session, acteur: Acteur, reglages: Settings, livreur_id: i
                   nb_clients=len(ids), date=jour.isoformat(), remplacee=existante is not None)
     db.commit()
     return tournee
-
-
-@dataclass
-class ApercuTournee:
-    periode: Periode
-    zone: Zone | None
-    limite: int
-    clients: list[Client]                 # ordre horaire proposé, puis clients en trop sur leur créneau
-    heures: dict[str, int]
-    refuses: list[str]
-    inconnus: list[str]
-    non_localises: list[str]
-    depart_au_plus_tard_s: int | None
-
-
-def apercu_tournee(db: Session, reglages: Settings, ids_clients: list[str], periode: str) -> ApercuTournee:
-    """Ce que donnerait la tournée AVANT de l'attribuer : ordre horaire, heure visée de chaque client,
-    charge par heure, limite (zone et période), départ du dépôt au plus tard. N'enregistre rien."""
-    p = _periode(periode, reglages)
-    ids = list(dict.fromkeys(i.strip() for i in ids_clients if i.strip()))
-    trouves = {c.id_client: c for c in db.scalars(select(Client).where(Client.id_client.in_(ids),
-                                                                       Client.actif.is_(True)))}
-    inconnus = [i for i in ids if i not in trouves]
-    clients = [trouves[i] for i in ids if i in trouves]
-    localises = [c for c in clients if c.latitude is not None]
-    zone_id = Counter(c.zone_id for c in clients).most_common(1)[0][0] if clients else None
-    zone = db.get(Zone, zone_id) if zone_id else None
-    limite = limite_periode(p, zone.max_clients if zone else 15, reglages.clients_max_par_heure)
-    f = faisabilite(localises, p, reglages)
-    rang = {i: k for k, i in enumerate(f.ordre)}
-    ordonnes = sorted(localises, key=lambda c: rang.get(c.id_client, len(rang)))
-    return ApercuTournee(p, zone, limite, ordonnes, f.heures, f.refuses, inconnus,
-                         [c.id_client for c in clients if c.latitude is None], f.depart_au_plus_tard_s)
 
 
 def avertissements_tournee(db: Session, reglages: Settings, tournee: Tournee) -> list[str]:
@@ -374,19 +345,45 @@ def _oublier_optimisation(db: Session, tournee: Tournee) -> None:
         l.ordre_passage, l.heure_arrivee_prevue = None, None
 
 
-def desattribuer_tournee(db: Session, acteur: Acteur, reglages: Settings, tournee_id: int) -> Tournee:
-    """Annule l'attribution : la tournée reste (clients, date, période) mais « en attente »,
-    sans livreur ; elle disparaît de l'application de l'ancien livreur."""
+def periode_de_tournee(tournee: Tournee, reglages: Settings) -> str:
+    """Nom de la période d'une tournée (d'après son heure de fin), « journee » par défaut."""
+    fin = en_secondes(tournee.heure_fin) if tournee.heure_fin else None
+    for p in periodes(reglages):
+        if p.fin_s == fin:
+            return p.nom
+    return "journee"
+
+
+def tournee_vers_l(db: Session, reglages: Settings, tournee: Tournee) -> TourneeL:
+    """Remet les clients d'une tournée (pas commencée) dans une tournée « L » à attribuer, puis
+    supprime la tournée datée (ses livraisons partent avec elle)."""
+    lignes = db.execute(select(Livraison, Client).join(Client, Client.id_client == Livraison.client_id)
+                        .where(Livraison.tournee_id == tournee.id)
+                        .order_by(Livraison.ordre_passage.asc().nulls_last(), Livraison.id)).all()
+    types = {c.type_camion_requis.value for _, c in lignes}
+    l = TourneeL(periode=periode_de_tournee(tournee, reglages), type_camion="hayon" if "hayon" in types else "normal",
+                 zone_id=tournee.zone_id)
+    db.add(l)
+    db.flush()
+    for k, (_, c) in enumerate(lignes):
+        db.add(ClientTourneeL(tournee_l_id=l.id, client_id=c.id_client, ordre=k))
+    db.execute(update(TourneeL).where(TourneeL.tournee_id == tournee.id).values(tournee_id=None))
+    db.delete(tournee)
+    db.flush()
+    return l
+
+
+def desattribuer_tournee(db: Session, acteur: Acteur, reglages: Settings, tournee_id: int) -> TourneeL:
+    """Annule l'attribution : la tournée (pas encore commencée) disparaît de l'application du livreur
+    et ses clients reviennent dans une tournée « L » à attribuer (nouvelle date, nouveau livreur)."""
     tournee = _tournee_modifiable(db, reglages, tournee_id)
-    if tournee.livreur_id is None:
-        raise ErreurAdmin(409, "Cette tournée est déjà en attente d'un livreur.")
-    ancien = db.get(Utilisateur, tournee.livreur_id)
-    tournee.livreur_id = tournee.vehicule_id = None
-    _oublier_optimisation(db, tournee)
-    acteur.tracer(db, "ADMIN_DESATTRIBUTION_TOURNEE", cible=ancien.identifiant, tournee_id=tournee.id,
-                  date=tournee.date_tournee.isoformat())
+    ancien = db.get(Utilisateur, tournee.livreur_id) if tournee.livreur_id else None
+    jour = tournee.date_tournee
+    l = tournee_vers_l(db, reglages, tournee)
+    acteur.tracer(db, "ADMIN_DESATTRIBUTION_TOURNEE", cible=ancien.identifiant if ancien else None,
+                  tournee_id=tournee_id, tournee_l=l.code, date=jour.isoformat())
     db.commit()
-    return tournee
+    return l
 
 
 def reattribuer_tournee(db: Session, acteur: Acteur, reglages: Settings, tournee_id: int,
@@ -544,6 +541,9 @@ def anonymiser_client(db: Session, acteur: Acteur, reglages: Settings, id_client
                         .limit(1))
     if a_venir is not None:
         raise ErreurAdmin(409, "Ce client a une livraison prévue : retirez-le de la tournée d'abord.")
+    # Retiré des tournées « L » pas encore attribuées
+    db.execute(delete(ClientTourneeL).where(ClientTourneeL.client_id == id_client, ClientTourneeL.tournee_l_id.in_(
+        select(TourneeL.id).where(TourneeL.tournee_id.is_(None)))))
     if client.voie:
         db.execute(delete(CacheGeocodage).where(
             CacheGeocodage.cle == cle_cache(client.voie, client.code_postal, client.ville)))

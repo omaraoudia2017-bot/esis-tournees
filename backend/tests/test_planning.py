@@ -27,13 +27,14 @@ def test_planning_de_la_semaine(client, db, jeu):
     assert a_case["nature"] == "tournee" and a_case["nb_clients"] == 5 and a_case["tournee_id"] == jeu["tournee"].id
     assert cases[(b.id, auj.isoformat())]["nature"] == "trajets"
 
-    # Attribution annulée : la case de A se libère, la tournée rejoint les tournées à attribuer,
+    # Attribution annulée : la case de A se libère, les clients rejoignent une tournée L à attribuer,
     # avec le camion qu'exigent ses clients (un client palette -> hayon)
-    assert client.post(f"/admin/tournees/{jeu['tournee'].id}/desattribuer", headers=admin).status_code == 200
+    r = client.post(f"/admin/tournees/{jeu['tournee'].id}/desattribuer", headers=admin)
+    assert r.status_code == 200
     p = client.get("/admin/planning", headers=admin, params={"debut": auj.isoformat()}).json()
     assert (livreurs["test.livreur.a"]["id"], auj.isoformat()) not in {(c["livreur_id"], c["date"]) for c in p["cases"]}
-    attente = next(t for t in p["a_attribuer"] if t["id"] == jeu["tournee"].id)
-    assert attente["type_camion_requis"] == "hayon" and attente["livreur"] is None
+    attente = next(t for t in p["a_attribuer"] if t["id"] == r.json()["id"])
+    assert attente["type_camion"] == "hayon" and attente["code"].startswith("L") and attente["nb_clients"] == 5
 
     # Semaine en cours par défaut ; réservé au planificateur
     assert client.get("/admin/planning", headers=admin).json()["jours"][0] <= auj.isoformat()

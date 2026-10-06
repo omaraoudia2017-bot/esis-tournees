@@ -69,53 +69,31 @@ GPS n'est enregistrée.
 
 ## 3. Planificateur : espace administrateur
 
-Six rubriques en haut de l'écran.
+Cinq rubriques en haut de l'écran : Tournées, Planning, Livreurs, Clients, Tableau de bord et sécurité.
 
-**Tableau de bord** (7, 30 ou 90 derniers jours) : nombre de tournées et de livraisons, part des
-passages dans le créneau du client, remplissage des tournées par rapport à la limite de la zone,
-écart entre temps sur place estimé et réel (et comparaison avec les valeurs fixes), alertes de
-connexion, comptes verrouillés, courbe par jour et liste des tournées.
+**Tournées** (le travail quotidien)
+1. « Importer un fichier de clients (CSV) » : format de l'échantillon (`id_client`, `nom_client`,
+   `adresse`, `creneau_horaire_prefere` obligatoires ; `telephone`, `digicode`, `notes_livraison`
+   facultatifs ; séparateur « , » ou « ; »), puis **Importer et préparer les tournées**. Un client
+   présent plusieurs fois n'est livré qu'une fois. Le bilan indique les lignes rejetées, les clients non
+   placés (adresse non localisée, déjà dans une tournée L) et les tournées préparées ; un bouton géocode
+   les adresses en attente et prépare leurs tournées.
+2. Les tournées préparées sont listées par code **L1, L2, L3…** (filtres : période, camion, code postal).
+   Elles sont **réalisables** : au plus 2 clients prévus dans une même heure, limite selon la période
+   (matin 14, après-midi 12, soirée 10 ; 20 seulement sur la journée complète, sans dépasser la limite
+   de la zone), ordre horaire, heure de départ du dépôt au plus tard.
+3. Ouvrir une tournée L : tableau des clients (passage visé, créneau, client, code postal, ville).
+   Choisir la **date** et le **livreur** (libre ce jour-là, bon camion) ; si besoin modifier la
+   **période**, l'**heure de départ du dépôt** ou les **clients** (colonne « Action » : retirer, ou
+   déplacer vers une autre tournée L). Puis **Attribuer** : la tournée apparaît dans l'application du
+   livreur, qui l'optimise (ordre géographique). « Supprimer » retire une tournée L inutile.
 
-**Planning** : grille des livreurs actifs (lignes) et des 7 jours de la semaine (colonnes), avec
-« Semaine précédente / suivante ». Chaque case montre la tournée du livreur (période, nombre de clients,
-prévue / en cours / terminée), sa journée de trajets, ou « libre ». En haut, les **tournées à
-attribuer** : celles dont l'attribution a été annulée et celles proposées dans « Répartition ».
-Choisir une tournée, puis cliquer sur « Attribuer » dans la colonne de son jour, sur la ligne d'un
-livreur libre équipé du bon camion. Cliquer sur une tournée du planning l'ouvre en dessous (carte,
-clients, changer de livreur, annuler l'attribution).
-
-**Tournées du jour**
-- Tableau des tournées du jour choisi (camion, zone, période, clients, pointés, à reporter, km).
-- « Suivre une tournée » : même carte et même liste que le livreur, en direct.
-- « Attribuer une tournée » : choisir d'abord la date puis le livreur (la liste indique qui est libre
-  et qui a DÉJÀ une tournée ce jour-là), la période, et coller les identifiants des clients. Refus
-  expliqués : camion inadapté, limite de la zone dépassée, client déjà prévu ce jour-là, client sans
-  position, date passée. Remplacer la tournée existante d'un livreur demande une case à cocher explicite.
-- Changer de livreur (tournée pas encore commencée) : « Suivre ou modifier une tournée », puis
-  « Donner la tournée à » un autre livreur libre ce jour-là, ou « Annuler l'attribution » : la
-  tournée passe **en attente** (clients et date conservés) et disparaît de l'application de l'ancien
-  livreur. Les tournées en attente sont listées en haut de la rubrique, chacune avec son choix de
-  livreur. Le nouveau livreur doit l'optimiser (l'ordre précédent est effacé).
-- « Ajouter un client déjà enregistré » à une tournée en cours.
-
-**Import CSV** : fichier au format de l'échantillon (`id_client`, `nom_client`, `adresse`,
-`creneau_horaire_prefere` obligatoires ; `telephone`, `digicode`, `notes_livraison` facultatifs ;
-séparateur « , » ou « ; »). Le bilan indique les clients créés, mis à jour et les lignes rejetées avec
-leur motif. Les nouvelles adresses sont localisées automatiquement (environ une par seconde) ; le
-bouton « Géocoder les adresses en attente » traite le reste par lots.
-
-**Répartition** (après un import) : la liste reprend les clients du dernier import ; on peut la
-compléter par identifiant ou par une recherche (code postal, ville, nom). « Classer et proposer »
-range les clients par secteur (zone, code postal), plage horaire (matin, après-midi, soirée, ou
-journée complète) et type de camion, coupe chaque groupe selon la limite de la zone et propose un
-livreur disponible (bon camion, pas encore de tournée ce jour-là). Chaque client peut être déplacé
-vers une autre tournée ou retiré ; on choisit le livreur, puis « Créer les tournées ». Les clients
-déjà planifiés ce jour-là ou non localisés sont écartés, avec le motif.
-Les tournées proposées sont **réalisables** : au plus 2 clients prévus dans une même heure (réglable),
-et une limite qui dépend de la période (matin 14, après-midi 12, soirée 10 ; 20 clients seulement sur
-la journée complète, sans dépasser la limite de la zone). Chaque tournée est rangée par ordre horaire
-(colonne « Passage visé ») et indique l'heure de **départ du dépôt au plus tard** ; le livreur
-optimise ensuite l'ordre géographique. Le livreur voit aussi cette heure de départ sur son écran.
+**Planning** : grille des livreurs actifs (lignes) et des 7 jours de la semaine (colonnes). Chaque case
+montre la tournée du livreur (période, clients ; prévue, en cours ou terminée), sa journée de trajets ou
+« libre ». Choisir une tournée L en haut, puis cliquer sur « Attribuer » le jour voulu sur la ligne d'un
+livreur libre (période et départ par défaut). Cliquer sur une tournée l'ouvre en dessous : carte,
+clients, pointages en direct, « Donner la tournée à » un autre livreur, « Annuler l'attribution » (ses
+clients reviennent dans une tournée L), ajout d'un client déjà enregistré.
 
 **Livreurs**
 - Créer un compte : un **code d'activation** est affiché dans un encadré jusqu'au clic sur « J'ai remis
@@ -136,7 +114,9 @@ optimise ensuite l'ordre géographique. Le livreur voit aussi cette heure de dé
   - **Anonymisation** (droit à l'effacement), irréversible : ressaisir l'identifiant pour confirmer.
     Impossible si le client a une livraison prévue.
 
-**Sécurité** : alertes de connexions anormales détectées par l'IA (heure inhabituelle, nouvel
+**Tableau de bord et sécurité** — Tableau de bord (7, 30 ou 90 derniers jours) : tournées, livraisons,
+passages dans le créneau, remplissage, écart entre temps sur place estimé et réel, alertes. Sécurité :
+alertes de connexions anormales détectées par l'IA (heure inhabituelle, nouvel
 appareil, échecs répétés…) — elles ne bloquent pas la connexion : vérifier auprès de la personne
 concernée — et journal de sécurité filtrable (connexions, refus d'accès, actions d'administration,
 consultations des digicodes, exports et anonymisations). Le journal ne peut être ni modifié ni effacé.

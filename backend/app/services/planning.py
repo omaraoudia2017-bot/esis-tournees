@@ -11,7 +11,7 @@ from datetime import date, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import Client, EtapeTrajet, JourneeTrajets, Livraison, Tournee, Utilisateur, Vehicule, Zone
+from app.models import EtapeTrajet, JourneeTrajets, Livraison, Tournee, Utilisateur, Vehicule, Zone
 from app.models.enums import RoleUtilisateur, StatutLivraison
 
 ISSUES = (StatutLivraison.LIVRE, StatutLivraison.ABSENT, StatutLivraison.REFUSE)
@@ -57,14 +57,3 @@ def planning(db: Session, debut: date, nb_jours: int = 7) -> Planning:
         .where(JourneeTrajets.date_journee.between(debut, fin)))]
     return Planning(debut, fin, list(livreurs), tournees, trajets)
 
-
-def types_camion_requis(db: Session, tournee_ids: list[int]) -> dict[int, str]:
-    """Type de camion qu'exigent les clients d'une tournée (« hayon » si au moins un client palette)."""
-    if not tournee_ids:
-        return {}
-    types: dict[int, set[str]] = {}
-    for tid, type_camion in db.execute(
-            select(Livraison.tournee_id, Client.type_camion_requis).join(Client, Client.id_client == Livraison.client_id)
-            .where(Livraison.tournee_id.in_(tournee_ids)).distinct()):
-        types.setdefault(tid, set()).add(type_camion.value)
-    return {tid: "hayon" if "hayon" in t else "normal" for tid, t in types.items()}
