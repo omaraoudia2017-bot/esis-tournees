@@ -387,7 +387,9 @@ def titre_l(t: dict) -> str:
     depart = (t["depart_au_plus_tard"] or "")[:5]
     return (f"{t['code']} · {LIBELLES_PERIODE[t['periode']]} · {t['zone'] or 'zone non définie'} · "
             f"{t['nb_clients']} clients · CP {', '.join(cps[:6])}{'…' if len(cps) > 6 else ''} · camion {t['type_camion']}"
-            + (f" · départ avant {depart}" if depart else ""))
+            + (f" · départ avant {depart}" if depart else "")
+            + (f" · :red[limite de {t['limite']} dépassée : à alléger avant d'attribuer]"
+               if t["nb_clients"] > t["limite"] else ""))
 
 
 def onglet_tournees() -> None:
