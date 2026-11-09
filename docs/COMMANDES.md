@@ -4,7 +4,7 @@ Toutes les commandes se lancent dans **PowerShell**, depuis le dossier du projet
 Astuce : dans VS Code, `Ctrl + Shift + V` affiche ce fichier en mode lecture.
 
 ```powershell
-cd "C:\Users\iegin\Desktop\ESIS\Projet Final\esis-tournees"
+cd "C:\Dev\esis-tournees"
 ```
 
 ---

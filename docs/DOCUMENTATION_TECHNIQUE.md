@@ -198,7 +198,7 @@ powershell -ExecutionPolicy Bypass -File exploitation\sauvegarder.ps1
 Format compressé `pg_dump`, dans `Documents\ESIS_sauvegardes` (hors du projet), empreinte SHA-256,
 14 sauvegardes conservées. Planification quotidienne à 22 h 30 (Planificateur de tâches Windows) :
 ```
-schtasks /Create /SC DAILY /ST 22:30 /TN "ESIS sauvegarde" /TR "powershell -ExecutionPolicy Bypass -File \"C:\Users\<utilisateur>\Desktop\ESIS\Projet Final\esis-tournees\exploitation\sauvegarder.ps1\""
+schtasks /Create /SC DAILY /ST 22:30 /TN "ESIS sauvegarde" /TR "powershell -ExecutionPolicy Bypass -File \"C:\Dev\esis-tournees\exploitation\sauvegarder.ps1\""
 ```
 Copier régulièrement le dossier des sauvegardes sur un support externe chiffré (règle 3-2-1 :
 3 copies, 2 supports, 1 hors site). Les sauvegardes contiennent des données personnelles : jamais
